@@ -337,3 +337,40 @@ body {
   height: 200px;
   margin-top: 16px;
 }
+
+.snackbar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 2000;
+  animation: slideUpFade 0.3s ease;
+  max-width: 90%;
+  text-align: center;
+}
+
+.snackbar.success {
+  background: #4caf50;
+  color: white;
+}
+
+.snackbar.error {
+  background: #f44336;
+  color: white;
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}

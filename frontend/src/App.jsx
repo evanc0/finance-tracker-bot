@@ -31,6 +31,7 @@ const CATEGORIES = {
 function App() {
   const [userData, setUserData] = useState(null)
   const [activeModal, setActiveModal] = useState(null)
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', type: 'success' })
   const [formData, setFormData] = useState({
     type: 'expense',
     amount: '',
@@ -72,6 +73,11 @@ function App() {
     }
   }
 
+  const showSnackbar = (message, type = 'success') => {
+    setSnackbar({ open: true, message, type })
+    setTimeout(() => setSnackbar({ open: false, message: '', type: 'success' }), 3000)
+  }
+
   const handleInputChange = (e) => {
     const { name, value } = e.target
     setFormData(prev => ({ ...prev, [name]: value }))
@@ -100,21 +106,13 @@ function App() {
             name: formData.name,
             balance: parseFloat(formData.balance)
           }))
-          // Не закрываем приложение, а просто закрываем модалку
           closeModal()
-          tg.showPopup({
-            title: 'Успешно',
-            message: 'Счёт успешно создан!'
-          })
-          // Перезагружаем данные
+          showSnackbar('Счёт успешно создан!')
           fetchUserData(userId)
         }
       } catch (error) {
         console.error('Ошибка создания счёта:', error)
-        tg.showAlert({
-          title: 'Ошибка',
-          message: 'Не удалось создать счёт'
-        })
+        showSnackbar('Не удалось создать счёт', 'error')
       }
     } else if (activeModal === 'expense' || activeModal === 'income') {
       if (!formData.amount || !formData.account_id || !formData.category) return
@@ -143,21 +141,13 @@ function App() {
             category: formData.category,
             description: formData.description
           }))
-          // Не закрываем приложение, а просто закрываем модалку
           closeModal()
-          tg.showPopup({
-            title: 'Успешно',
-            message: `Операция успешно ${activeModal === 'expense' ? 'создана' : 'создана'}!`
-          })
-          // Перезагружаем данные
+          showSnackbar(`Операция успешно ${activeModal === 'expense' ? 'создана' : 'создана'}!`)
           fetchUserData(userId)
         }
       } catch (error) {
         console.error('Ошибка создания транзакции:', error)
-        tg.showAlert({
-          title: 'Ошибка',
-          message: 'Не удалось создать операцию'
-        })
+        showSnackbar('Не удалось создать операцию', 'error')
       }
     }
   }
@@ -436,6 +426,13 @@ function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Snackbar */}
+      {snackbar.open && (
+        <div className={`snackbar snackbar-${snackbar.type}`}>
+          {snackbar.message}
         </div>
       )}
     </div>
