@@ -8,7 +8,7 @@ const tg = window.Telegram.WebApp
 tg.ready()
 tg.expand()
 
-const CATEGORIES = {
+const DEFAULT_CATEGORIES = {
   income: [
     { id: 'salary', name: 'Зарплата', icon: '💰' },
     { id: 'freelance', name: 'Фриланс', icon: '💻' },
@@ -28,10 +28,29 @@ const CATEGORIES = {
   ]
 }
 
+const getStartOfMonth = (date) => {
+  return new Date(date.getFullYear(), date.getMonth(), 1)
+}
+
+const getEndOfMonth = (date) => {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0)
+}
+
+const formatDate = (date) => {
+  return date.toISOString().split('T')[0]
+}
+
 function App() {
   const [userData, setUserData] = useState(null)
   const [activeModal, setActiveModal] = useState(null)
   const [snackbar, setSnackbar] = useState({ open: false, message: '', type: 'success' })
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [customCategories, setCustomCategories] = useState({ income: [], expense: [] })
+  const [dateFilter, setDateFilter] = useState({
+    start: formatDate(getStartOfMonth(new Date())),
+    end: formatDate(getEndOfMonth(new Date()))
+  })
+  const [typeFilter, setTypeFilter] = useState('all') // all, income, expense
   const [formData, setFormData] = useState({
     type: 'expense',
     amount: '',
@@ -39,11 +58,18 @@ function App() {
     category: '',
     description: '',
     name: '',
-    balance: ''
+    balance: '',
+    newCategoryName: '',
+    newCategoryIcon: '📝'
   })
 
   useEffect(() => {
     const userId = tg.initDataUnsafe?.user?.id || 123456789
+    // Загружаем кастомные категории из localStorage
+    const savedCategories = localStorage.getItem(`customCategories_${userId}`)
+    if (savedCategories) {
+      setCustomCategories(JSON.parse(savedCategories))
+    }
     fetchUserData(userId)
   }, [])
 
@@ -78,6 +104,44 @@ function App() {
     setTimeout(() => setSnackbar({ open: false, message: '', type: 'success' }), 3000)
   }
 
+  const saveCustomCategories = (userId, categories) => {
+    setCustomCategories(categories)
+    localStorage.setItem(`customCategories_${userId}`, JSON.stringify(categories))
+  }
+
+  const addCustomCategory = (userId, type, name, icon) => {
+    const newCategories = { ...customCategories }
+    newCategories[type].push({ id: `custom_${Date.now()}`, name, icon })
+    saveCustomCategories(userId, newCategories)
+  }
+
+  const deleteCustomCategory = (userId, type, categoryId) => {
+    const newCategories = { ...customCategories }
+    newCategories[type] = newCategories[type].filter(c => c.id !== categoryId)
+    saveCustomCategories(userId, newCategories)
+  }
+
+  const deleteAccount = async (accountId, accountName) => {
+    const userId = tg.initDataUnsafe?.user?.id || 123456789
+    try {
+      const response = await fetch(`http://localhost:8000/api/accounts/${accountId}`, {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        showSnackbar(`Счёт "${accountName}" удалён!`)
+        fetchUserData(userId)
+      }
+    } catch (error) {
+      console.error('Ошибка удаления счёта:', error)
+      showSnackbar('Не удалось удалить счёт', 'error')
+    }
+    setConfirmDelete(null)
+  }
+
+  const getAllCategories = (type) => {
+    return [...DEFAULT_CATEGORIES[type], ...(customCategories[type] || [])]
+  }
+
   const handleInputChange = (e) => {
     const { name, value } = e.target
     setFormData(prev => ({ ...prev, [name]: value }))
@@ -88,7 +152,7 @@ function App() {
 
     if (activeModal === 'create_account') {
       if (!formData.name || !formData.balance) return
-      
+
       try {
         const response = await fetch('http://localhost:8000/api/accounts', {
           method: 'POST',
@@ -99,7 +163,7 @@ function App() {
             balance: parseFloat(formData.balance)
           })
         })
-        
+
         if (response.ok) {
           tg.sendData(JSON.stringify({
             type: 'create_account',
@@ -149,7 +213,15 @@ function App() {
         console.error('Ошибка создания транзакции:', error)
         showSnackbar('Не удалось создать операцию', 'error')
       }
+    } else if (activeModal === 'add_category') {
+      if (!formData.newCategoryName) return
+      
+      addCustomCategory(userId, formData.type, formData.newCategoryName, formData.newCategoryIcon)
+      showSnackbar('Категория добавлена!')
+      closeModal()
     }
+
+    setActiveModal(null)
   }
 
   const openModal = (modalType) => {
@@ -168,7 +240,9 @@ function App() {
       category: '',
       description: '',
       name: '',
-      balance: ''
+      balance: '',
+      newCategoryName: '',
+      newCategoryIcon: '📝'
     })
   }
 
@@ -176,24 +250,33 @@ function App() {
     if (!userData) return { totalBalance: 0, totalIncome: 0, totalExpense: 0 }
     
     const totalBalance = userData.accounts.reduce((sum, acc) => sum + parseFloat(acc.balance), 0)
-    const totalIncome = userData.transactions
+    
+    // Фильтруем транзакции по датам и типу
+    const filteredTransactions = userData.transactions.filter(t => {
+      const transDate = new Date(t.created_at).toISOString().split('T')[0]
+      const inDateRange = transDate >= dateFilter.start && transDate <= dateFilter.end
+      const typeMatch = typeFilter === 'all' || t.type === typeFilter
+      return inDateRange && typeMatch
+    })
+    
+    const totalIncome = filteredTransactions
       .filter(t => t.type === 'income')
       .reduce((sum, t) => sum + parseFloat(t.amount), 0)
-    const totalExpense = userData.transactions
+    const totalExpense = filteredTransactions
       .filter(t => t.type === 'expense')
       .reduce((sum, t) => sum + parseFloat(t.amount), 0)
 
-    return { totalBalance, totalIncome, totalExpense }
+    return { totalBalance, totalIncome, totalExpense, filteredTransactions }
   }
 
   const getCategoryIcon = (categoryId, type) => {
-    const categories = CATEGORIES[type] || []
+    const categories = getAllCategories(type)
     const category = categories.find(c => c.id === categoryId)
     return category?.icon || '📝'
   }
 
   const getCategoryName = (categoryId, type) => {
-    const categories = CATEGORIES[type] || []
+    const categories = getAllCategories(type)
     const category = categories.find(c => c.id === categoryId)
     return category?.name || categoryId
   }
@@ -201,12 +284,16 @@ function App() {
   const getChartData = () => {
     if (!userData) return { labels: [], datasets: [] }
 
+    // Фильтруем транзакции по датам
+    const filteredTransactions = userData.transactions.filter(t => {
+      const transDate = new Date(t.created_at).toISOString().split('T')[0]
+      return transDate >= dateFilter.start && transDate <= dateFilter.end && t.type === 'expense'
+    })
+
     const expensesByCategory = {}
-    userData.transactions
-      .filter(t => t.type === 'expense')
-      .forEach(t => {
-        expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + parseFloat(t.amount)
-      })
+    filteredTransactions.forEach(t => {
+      expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + parseFloat(t.amount)
+    })
 
     const categories = Object.keys(expensesByCategory)
     const values = Object.values(expensesByCategory)
@@ -224,9 +311,52 @@ function App() {
 
   const stats = calculateStats()
   const currency = userData?.user?.currency || 'RUB'
+  const userId = tg.initDataUnsafe?.user?.id || 123456789
 
   return (
     <div className="app">
+      {/* Фильтры */}
+      <div className="filters-card card">
+        <div className="filter-row">
+          <div className="filter-group">
+            <label>С</label>
+            <input
+              type="date"
+              value={dateFilter.start}
+              onChange={(e) => setDateFilter({ ...dateFilter, start: e.target.value })}
+            />
+          </div>
+          <div className="filter-group">
+            <label>По</label>
+            <input
+              type="date"
+              value={dateFilter.end}
+              onChange={(e) => setDateFilter({ ...dateFilter, end: e.target.value })}
+            />
+          </div>
+        </div>
+        <div className="filter-type">
+          <button
+            className={`filter-btn ${typeFilter === 'all' ? 'active' : ''}`}
+            onClick={() => setTypeFilter('all')}
+          >
+            Все
+          </button>
+          <button
+            className={`filter-btn ${typeFilter === 'income' ? 'active' : ''}`}
+            onClick={() => setTypeFilter('income')}
+          >
+            Доходы
+          </button>
+          <button
+            className={`filter-btn ${typeFilter === 'expense' ? 'active' : ''}`}
+            onClick={() => setTypeFilter('expense')}
+          >
+            Расходы
+          </button>
+        </div>
+      </div>
+
       <div className="header">
         <div className="total-balance">
           <h1>{stats.totalBalance.toFixed(2)} {currency}</h1>
@@ -264,13 +394,23 @@ function App() {
       </div>
 
       <div className="card">
-        <h2>📊 Счета</h2>
+        <div className="card-header">
+          <h2>📊 Счета</h2>
+          <button className="manage-categories-btn" onClick={() => openModal('manage_categories')}>
+            ⚙️ Категории
+          </button>
+        </div>
         {userData?.accounts?.length > 0 ? (
           <div className="account-list">
             {userData.accounts.map(account => (
               <div key={account.id} className="account-item">
-                <span className="name">{account.name}</span>
-                <span className="balance">{parseFloat(account.balance).toFixed(2)} {currency}</span>
+                <div className="account-info">
+                  <span className="name">{account.name}</span>
+                  <span className="balance">{parseFloat(account.balance).toFixed(2)} {currency}</span>
+                </div>
+                <button className="delete-account-btn" onClick={() => setConfirmDelete(account)}>
+                  🗑️
+                </button>
               </div>
             ))}
           </div>
@@ -296,10 +436,10 @@ function App() {
       </div>
 
       <div className="card">
-        <h2>📋 Последние операции</h2>
-        {userData?.transactions?.length > 0 ? (
+        <h2>📋 Операции</h2>
+        {stats.filteredTransactions?.length > 0 ? (
           <div className="transaction-list">
-            {userData.transactions.slice(0, 10).map(transaction => (
+            {stats.filteredTransactions.slice(0, 20).map(transaction => (
               <div key={transaction.id} className="transaction-item">
                 <div className="left">
                   <div className={`icon ${transaction.type}`}>
@@ -320,11 +460,12 @@ function App() {
           </div>
         ) : (
           <div className="empty-state">
-            <p>Нет операций</p>
+            <p>Нет операций за выбранный период</p>
           </div>
         )}
       </div>
 
+      {/* Модальные окна */}
       {activeModal && (
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -332,6 +473,8 @@ function App() {
               {activeModal === 'expense' && '➕ Расход'}
               {activeModal === 'income' && '➕ Доход'}
               {activeModal === 'create_account' && '🏦 Новый счёт'}
+              {activeModal === 'add_category' && '📁 Новая категория'}
+              {activeModal === 'manage_categories' && '⚙️ Управление категориями'}
             </h2>
 
             {activeModal === 'create_account' ? (
@@ -358,6 +501,83 @@ function App() {
                   />
                 </div>
               </>
+            ) : activeModal === 'add_category' ? (
+              <>
+                <div className="form-group">
+                  <label>Тип категории</label>
+                  <select
+                    name="type"
+                    value={formData.type}
+                    onChange={handleInputChange}
+                  >
+                    <option value="income">Доход</option>
+                    <option value="expense">Расход</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Название</label>
+                  <input
+                    type="text"
+                    name="newCategoryName"
+                    value={formData.newCategoryName}
+                    onChange={handleInputChange}
+                    placeholder="Например: Такси"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Иконка</label>
+                  <input
+                    type="text"
+                    name="newCategoryIcon"
+                    value={formData.newCategoryIcon}
+                    onChange={handleInputChange}
+                    placeholder="🚕"
+                    maxLength={2}
+                  />
+                </div>
+              </>
+            ) : activeModal === 'manage_categories' ? (
+              <div className="manage-categories">
+                <div className="category-section">
+                  <h3>Доходы</h3>
+                  <div className="category-list">
+                    {getAllCategories('income').map(cat => (
+                      <div key={cat.id} className="category-item">
+                        <span>{cat.icon} {cat.name}</span>
+                        {cat.id?.startsWith('custom_') && (
+                          <button
+                            className="delete-category-btn"
+                            onClick={() => deleteCustomCategory(userId, 'income', cat.id)}
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="category-section">
+                  <h3>Расходы</h3>
+                  <div className="category-list">
+                    {getAllCategories('expense').map(cat => (
+                      <div key={cat.id} className="category-item">
+                        <span>{cat.icon} {cat.name}</span>
+                        {cat.id?.startsWith('custom_') && (
+                          <button
+                            className="delete-category-btn"
+                            onClick={() => deleteCustomCategory(userId, 'expense', cat.id)}
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <button className="btn btn-primary" onClick={() => openModal('add_category')}>
+                  + Добавить категорию
+                </button>
+              </div>
             ) : (
               <>
                 <div className="form-row">
@@ -397,7 +617,7 @@ function App() {
                     onChange={handleInputChange}
                   >
                     <option value="">Выберите категорию</option>
-                    {CATEGORIES[activeModal]?.map(cat => (
+                    {getAllCategories(activeModal).map(cat => (
                       <option key={cat.id} value={cat.id}>
                         {cat.icon} {cat.name}
                       </option>
@@ -421,8 +641,35 @@ function App() {
               <button className="btn btn-secondary" onClick={closeModal}>
                 Отмена
               </button>
-              <button className="btn btn-primary" onClick={handleSubmit}>
-                Сохранить
+              {activeModal !== 'manage_categories' && (
+                <button className="btn btn-primary" onClick={handleSubmit}>
+                  Сохранить
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Подтверждение удаления счёта */}
+      {confirmDelete && (
+        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>🗑️ Удаление счёта</h2>
+            <p>
+              Вы уверены, что хотите удалить счёт <strong>"{confirmDelete.name}"</strong>?
+              {parseFloat(confirmDelete.balance) !== 0 && (
+                <span className="warning-text">
+                  <br />Баланс счёта: {parseFloat(confirmDelete.balance).toFixed(2)} {currency}
+                </span>
+              )}
+            </p>
+            <div className="btn-group">
+              <button className="btn btn-secondary" onClick={() => setConfirmDelete(null)}>
+                Отмена
+              </button>
+              <button className="btn btn-primary" onClick={() => deleteAccount(confirmDelete.id, confirmDelete.name)}>
+                Удалить
               </button>
             </div>
           </div>
