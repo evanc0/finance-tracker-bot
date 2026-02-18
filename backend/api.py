@@ -199,26 +199,26 @@ async def update_transaction(transaction_id: int, transaction_update: Transactio
         account = db.query(Account).filter(Account.id == transaction.account_id).first()
         if account:
             if transaction.type == "expense":
-                account.balance -= diff
+                account.balance = float(account.balance) - diff
             else:
-                account.balance += diff
+                account.balance = float(account.balance) + diff
 
     if transaction_update.account_id is not None and transaction_update.account_id != transaction.account_id:
         # Старый счёт
         old_account = db.query(Account).filter(Account.id == transaction.account_id).first()
         if old_account:
             if transaction.type == "expense":
-                old_account.balance += float(transaction.amount)
+                old_account.balance = float(old_account.balance) + float(transaction.amount)
             else:
-                old_account.balance -= float(transaction.amount)
+                old_account.balance = float(old_account.balance) - float(transaction.amount)
 
         # Новый счёт
         new_account = db.query(Account).filter(Account.id == transaction_update.account_id).first()
         if new_account:
             if transaction.type == "expense":
-                new_account.balance -= float(transaction.amount)
+                new_account.balance = float(new_account.balance) - float(transaction.amount)
             else:
-                new_account.balance += float(transaction.amount)
+                new_account.balance = float(new_account.balance) + float(transaction.amount)
 
         transaction.account_id = transaction_update.account_id
 
@@ -243,9 +243,9 @@ async def delete_transaction(transaction_id: int, db: Session = Depends(get_db))
     account = db.query(Account).filter(Account.id == transaction.account_id).first()
     if account:
         if transaction.type == "expense":
-            account.balance += float(transaction.amount)
+            account.balance = float(account.balance) + float(transaction.amount)
         else:
-            account.balance -= float(transaction.amount)
+            account.balance = float(account.balance) - float(transaction.amount)
 
     db.delete(transaction)
     db.commit()
