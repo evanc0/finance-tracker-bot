@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
+import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, BarElement } from 'chart.js'
 import { Pie } from 'react-chartjs-2'
+
+// Регистрируем компоненты глобально
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, BarElement)
 
 const tg = window.Telegram.WebApp
 tg.ready()
