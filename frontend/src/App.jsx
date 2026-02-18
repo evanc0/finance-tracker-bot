@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Pie } from 'react-chartjs-2'
 
-ChartJS.register(ArcElement, Tooltip, Legend)
-
 const tg = window.Telegram.WebApp
 tg.ready()
 tg.expand()
@@ -47,12 +45,12 @@ function App() {
   const [activeModal, setActiveModal] = useState(null)
   const [snackbar, setSnackbar] = useState({ open: false, message: '', type: 'success' })
   const [confirmDelete, setConfirmDelete] = useState(null)
-  const [customCategories, setCustomCategories] = useState({ income: [], expense: [] })
   const [dateFilter, setDateFilter] = useState({
     start: formatDate(getStartOfMonth(new Date())),
     end: formatDate(getEndOfMonth(new Date()))
   })
   const [typeFilter, setTypeFilter] = useState('all') // all, income, expense
+  const [editTransaction, setEditTransaction] = useState(null)
   const [formData, setFormData] = useState({
     type: 'expense',
     amount: '',
@@ -67,11 +65,6 @@ function App() {
 
   useEffect(() => {
     const userId = tg.initDataUnsafe?.user?.id || 123456789
-    // Загружаем кастомные категории из localStorage
-    const savedCategories = localStorage.getItem(`customCategories_${userId}`)
-    if (savedCategories) {
-      setCustomCategories(JSON.parse(savedCategories))
-    }
     fetchUserData(userId)
   }, [])
 
@@ -88,7 +81,8 @@ function App() {
         setUserData({
           user: { telegram_id: telegramId, currency: 'RUB' },
           accounts: [],
-          transactions: []
+          transactions: [],
+          categories: []
         })
       }
     } catch (error) {
@@ -96,7 +90,8 @@ function App() {
       setUserData({
         user: { telegram_id: telegramId, currency: 'RUB' },
         accounts: [],
-        transactions: []
+        transactions: [],
+        categories: []
       })
     }
   }
@@ -106,21 +101,46 @@ function App() {
     setTimeout(() => setSnackbar({ open: false, message: '', type: 'success' }), 3000)
   }
 
-  const saveCustomCategories = (userId, categories) => {
-    setCustomCategories(categories)
-    localStorage.setItem(`customCategories_${userId}`, JSON.stringify(categories))
+  const getAllCategories = (type) => {
+    const dbCategories = userData?.categories?.filter(c => c.type === type) || []
+    return [...DEFAULT_CATEGORIES[type], ...dbCategories]
   }
 
-  const addCustomCategory = (userId, type, name, icon) => {
-    const newCategories = { ...customCategories }
-    newCategories[type].push({ id: `custom_${Date.now()}`, name, icon })
-    saveCustomCategories(userId, newCategories)
+  const addCustomCategory = async (userId, type, name, icon) => {
+    try {
+      const response = await fetch(`${API_URL}/api/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          name,
+          icon,
+          type
+        })
+      })
+      if (response.ok) {
+        showSnackbar('Категория добавлена!')
+        fetchUserData(userId)
+      }
+    } catch (error) {
+      console.error('Ошибка добавления категории:', error)
+      showSnackbar('Не удалось добавить категорию', 'error')
+    }
   }
 
-  const deleteCustomCategory = (userId, type, categoryId) => {
-    const newCategories = { ...customCategories }
-    newCategories[type] = newCategories[type].filter(c => c.id !== categoryId)
-    saveCustomCategories(userId, newCategories)
+  const deleteCustomCategory = async (userId, categoryId) => {
+    try {
+      const response = await fetch(`${API_URL}/api/categories/${categoryId}`, {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        showSnackbar('Категория удалена!')
+        fetchUserData(userId)
+      }
+    } catch (error) {
+      console.error('Ошибка удаления категории:', error)
+      showSnackbar('Не удалось удалить категорию', 'error')
+    }
   }
 
   const deleteAccount = async (accountId, accountName) => {
@@ -140,8 +160,21 @@ function App() {
     setConfirmDelete(null)
   }
 
-  const getAllCategories = (type) => {
-    return [...DEFAULT_CATEGORIES[type], ...(customCategories[type] || [])]
+  const deleteTransaction = async (transactionId) => {
+    const userId = tg.initDataUnsafe?.user?.id || 123456789
+    try {
+      const response = await fetch(`${API_URL}/api/transactions/${transactionId}`, {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        showSnackbar('Операция удалена!')
+        fetchUserData(userId)
+      }
+    } catch (error) {
+      console.error('Ошибка удаления операции:', error)
+      showSnackbar('Не удалось удалить операцию', 'error')
+    }
+    setConfirmDelete(null)
   }
 
   const handleInputChange = (e) => {
@@ -217,24 +250,58 @@ function App() {
       }
     } else if (activeModal === 'add_category') {
       if (!formData.newCategoryName) return
-      
+
       addCustomCategory(userId, formData.type, formData.newCategoryName, formData.newCategoryIcon)
-      showSnackbar('Категория добавлена!')
       closeModal()
+    } else if (activeModal === 'edit_transaction' && editTransaction) {
+      if (!formData.amount || !formData.category) return
+
+      try {
+        const response = await fetch(`${API_URL}/api/transactions/${editTransaction.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: parseFloat(formData.amount),
+            category: formData.category,
+            description: formData.description,
+            account_id: parseInt(formData.account_id)
+          })
+        })
+
+        if (response.ok) {
+          showSnackbar('Операция обновлена!')
+          fetchUserData(userId)
+        }
+      } catch (error) {
+        console.error('Ошибка обновления операции:', error)
+        showSnackbar('Не удалось обновить операцию', 'error')
+      }
+      closeModal()
+      setEditTransaction(null)
     }
 
     setActiveModal(null)
   }
 
-  const openModal = (modalType) => {
+  const openModal = (modalType, transaction = null) => {
     setActiveModal(modalType)
     if (modalType === 'expense' || modalType === 'income') {
       setFormData(prev => ({ ...prev, type: modalType }))
+    } else if (modalType === 'edit_transaction' && transaction) {
+      setEditTransaction(transaction)
+      setFormData({
+        ...formData,
+        amount: transaction.amount.toString(),
+        category: transaction.category,
+        description: transaction.description || '',
+        account_id: transaction.account_id.toString()
+      })
     }
   }
 
   const closeModal = () => {
     setActiveModal(null)
+    setEditTransaction(null)
     setFormData({
       type: 'expense',
       amount: '',
@@ -250,9 +317,9 @@ function App() {
 
   const calculateStats = () => {
     if (!userData) return { totalBalance: 0, totalIncome: 0, totalExpense: 0 }
-    
+
     const totalBalance = userData.accounts.reduce((sum, acc) => sum + parseFloat(acc.balance), 0)
-    
+
     // Фильтруем транзакции по датам и типу
     const filteredTransactions = userData.transactions.filter(t => {
       const transDate = new Date(t.created_at).toISOString().split('T')[0]
@@ -260,7 +327,7 @@ function App() {
       const typeMatch = typeFilter === 'all' || t.type === typeFilter
       return inDateRange && typeMatch
     })
-    
+
     const totalIncome = filteredTransactions
       .filter(t => t.type === 'income')
       .reduce((sum, t) => sum + parseFloat(t.amount), 0)
@@ -452,10 +519,23 @@ function App() {
                     <div className="date">
                       {new Date(transaction.created_at).toLocaleDateString('ru-RU')}
                     </div>
+                    {transaction.description && (
+                      <div className="description">{transaction.description}</div>
+                    )}
                   </div>
                 </div>
-                <div className={`amount ${transaction.type}`}>
-                  {transaction.type === 'income' ? '+' : '-'}{parseFloat(transaction.amount).toFixed(2)} {currency}
+                <div className="right">
+                  <div className={`amount ${transaction.type}`}>
+                    {transaction.type === 'income' ? '+' : '-'}{parseFloat(transaction.amount).toFixed(2)} {currency}
+                  </div>
+                  <div className="transaction-actions">
+                    <button className="edit-btn" onClick={() => openModal('edit_transaction', transaction)}>
+                      ✏️
+                    </button>
+                    <button className="delete-btn" onClick={() => setConfirmDelete(transaction)}>
+                      🗑️
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -477,6 +557,7 @@ function App() {
               {activeModal === 'create_account' && '🏦 Новый счёт'}
               {activeModal === 'add_category' && '📁 Новая категория'}
               {activeModal === 'manage_categories' && '⚙️ Управление категориями'}
+              {activeModal === 'edit_transaction' && '✏️ Редактировать операцию'}
             </h2>
 
             {activeModal === 'create_account' ? (
@@ -546,10 +627,10 @@ function App() {
                     {getAllCategories('income').map(cat => (
                       <div key={cat.id} className="category-item">
                         <span>{cat.icon} {cat.name}</span>
-                        {cat.id?.startsWith('custom_') && (
+                        {!cat.id.startsWith('salary') && !cat.id.startsWith('freelance') && !cat.id.startsWith('investments') && !cat.id.startsWith('gift') && !cat.id.startsWith('other_income') && (
                           <button
                             className="delete-category-btn"
-                            onClick={() => deleteCustomCategory(userId, 'income', cat.id)}
+                            onClick={() => deleteCustomCategory(userId, cat.id)}
                           >
                             🗑️
                           </button>
@@ -564,10 +645,10 @@ function App() {
                     {getAllCategories('expense').map(cat => (
                       <div key={cat.id} className="category-item">
                         <span>{cat.icon} {cat.name}</span>
-                        {cat.id?.startsWith('custom_') && (
+                        {!cat.id.startsWith('food') && !cat.id.startsWith('transport') && !cat.id.startsWith('shopping') && !cat.id.startsWith('entertainment') && !cat.id.startsWith('health') && !cat.id.startsWith('utilities') && !cat.id.startsWith('education') && !cat.id.startsWith('other_expense') && (
                           <button
                             className="delete-category-btn"
-                            onClick={() => deleteCustomCategory(userId, 'expense', cat.id)}
+                            onClick={() => deleteCustomCategory(userId, cat.id)}
                           >
                             🗑️
                           </button>
@@ -580,6 +661,63 @@ function App() {
                   + Добавить категорию
                 </button>
               </div>
+            ) : activeModal === 'edit_transaction' ? (
+              <>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Сумма</label>
+                    <input
+                      type="number"
+                      name="amount"
+                      value={formData.amount}
+                      onChange={handleInputChange}
+                      placeholder="0.00"
+                      step="0.01"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Счёт</label>
+                    <select
+                      name="account_id"
+                      value={formData.account_id}
+                      onChange={handleInputChange}
+                    >
+                      {userData?.accounts?.map(account => (
+                        <option key={account.id} value={account.id}>
+                          {account.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Категория</label>
+                  <select
+                    name="category"
+                    value={formData.category}
+                    onChange={handleInputChange}
+                  >
+                    <option value="">Выберите категорию</option>
+                    {getAllCategories(editTransaction?.type).map(cat => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.icon} {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Описание</label>
+                  <textarea
+                    name="description"
+                    value={formData.description}
+                    onChange={handleInputChange}
+                    placeholder="Комментарий к операции"
+                  />
+                </div>
+              </>
             ) : (
               <>
                 <div className="form-row">
@@ -645,7 +783,7 @@ function App() {
               </button>
               {activeModal !== 'manage_categories' && (
                 <button className="btn btn-primary" onClick={handleSubmit}>
-                  Сохранить
+                  {activeModal === 'edit_transaction' ? 'Сохранить' : 'Создать'}
                 </button>
               )}
             </div>
@@ -653,24 +791,40 @@ function App() {
         </div>
       )}
 
-      {/* Подтверждение удаления счёта */}
+      {/* Подтверждение удаления */}
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>🗑️ Удаление счёта</h2>
-            <p>
-              Вы уверены, что хотите удалить счёт <strong>"{confirmDelete.name}"</strong>?
-              {parseFloat(confirmDelete.balance) !== 0 && (
+            <h2>🗑️ Удаление</h2>
+            {confirmDelete.name ? (
+              <p>
+                Вы уверены, что хотите удалить счёт <strong>"{confirmDelete.name}"</strong>?
+                {parseFloat(confirmDelete.balance) !== 0 && (
+                  <span className="warning-text">
+                    <br />Баланс счёта: {parseFloat(confirmDelete.balance).toFixed(2)} {currency}
+                  </span>
+                )}
+              </p>
+            ) : confirmDelete.id ? (
+              <p>
+                Вы уверены, что хотите удалить операцию?
+                <br />
                 <span className="warning-text">
-                  <br />Баланс счёта: {parseFloat(confirmDelete.balance).toFixed(2)} {currency}
+                  Сумма: {parseFloat(confirmDelete.amount).toFixed(2)} {currency}
                 </span>
-              )}
-            </p>
+              </p>
+            ) : null}
             <div className="btn-group">
               <button className="btn btn-secondary" onClick={() => setConfirmDelete(null)}>
                 Отмена
               </button>
-              <button className="btn btn-primary" onClick={() => deleteAccount(confirmDelete.id, confirmDelete.name)}>
+              <button className="btn btn-primary" onClick={() => {
+                if (confirmDelete.name) {
+                  deleteAccount(confirmDelete.id, confirmDelete.name)
+                } else if (confirmDelete.id && !confirmDelete.name) {
+                  deleteTransaction(confirmDelete.id)
+                }
+              }}>
                 Удалить
               </button>
             </div>
