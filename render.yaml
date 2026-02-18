@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: finance-tracker-api
+    env: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: DATABASE_URL
+        value: sqlite:///./finance_tracker.db
+    disk:
+      name: data
+      mountPath: /backend
+      sizeGB: 1

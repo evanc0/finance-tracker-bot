@@ -63,68 +63,85 @@ npm run dev
 npm run build
 ```
 
-## Публикация на GitHub Pages
+## Публикация на GitHub Pages и Render
 
-### 1. Создайте репозиторий на GitHub
+### Часть 1: Размещение API на Render (бесплатно)
 
-```bash
-cd finance-tracker-bot
+1. **Зарегистрируйся на Render**
+   - Перейди на https://render.com
+   - Нажми "Sign up with GitHub"
+   - Авторизуйся через GitHub
 
-# Инициализировать git
-git init
+2. **Создай новый Web Service**
+   - Нажми "New +" → "Web Service"
+   - Выбери "Connect a repository"
+   - Найди свой репозиторий `finance-tracker-bot`
 
-# Добавить все файлы
-git add .
+3. **Настрой сервис**
+   - **Name**: `finance-tracker-api` (или любое имя)
+   - **Region**: Frankfurt (ближе к Европе)
+   - **Branch**: `main`
+   - **Root Directory**: `backend`
+   - **Runtime**: `Python 3`
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `uvicorn api:app --host 0.0.0.0 --port $PORT`
 
-# Сделать коммит
-git commit -m "Initial commit"
+4. **Выбери тариф**
+   - Выбери **Free** тариф
 
-# Добавить удалённый репозиторий (замените YOUR_USERNAME на ваш логин)
-git remote add origin https://github.com/YOUR_USERNAME/finance-tracker-bot.git
+5. **Нажми "Create Web Service"**
+   - Дождись завершения деплоя (2-5 минут)
+   - Скопируй URL сервиса (например: `https://finance-tracker-api.onrender.com`)
 
-# Отправить в main ветку
-git branch -M main
-git push -u origin main
-```
+6. **Проверь API**
+   - Открой в браузере: `https://your-api.onrender.com/api/user/123456`
+   - Должен вернуться JSON с данными
 
-### 2. Включите GitHub Pages
+### Часть 2: Обновление frontend
 
-1. Зайдите в настройки репозитория на GitHub
-2. Перейдите в раздел **Pages**
-3. В разделе **Build and deployment**:
+1. **Обнови `frontend/src/config.js`**
+   ```javascript
+   export const API_URL = 'https://your-api.onrender.com'
+   ```
+
+2. **Пересобери и задеплой**
+   ```bash
+   cd frontend
+   npm run build
+   npm run deploy
+   ```
+
+### Часть 3: GitHub Pages для frontend
+
+1. **Включи GitHub Pages**
+   - Зайди в настройки репозитория на GitHub
+   - Перейди в раздел **Pages**
    - Source: **Deploy from a branch**
    - Branch: **gh-pages** → **/** (root)
-4. Нажмите **Save**
 
-### 3. Разместите frontend на GitHub Pages
+2. **Frontend будет доступен по адресу**
+   ```
+   https://YOUR_USERNAME.github.io/finance-tracker-bot/
+   ```
 
-```bash
-cd frontend
+### Часть 4: Настройка бота
 
-# Установить gh-pages (если ещё не установлен)
-npm install
+1. **Обнови Web App URL в BotFather**
+   ```
+   https://YOUR_USERNAME.github.io/finance-tracker-bot/
+   ```
 
-# Задеплоить на GitHub Pages
-npm run deploy
-```
+2. **Обнови `backend/.env`**
+   ```
+   TELEGRAM_BOT_TOKEN=your_token_here
+   WEB_APP_URL=https://YOUR_USERNAME.github.io/finance-tracker-bot/
+   ```
 
-После деплоя ваш Web App будет доступен по адресу:
-```
-https://YOUR_USERNAME.github.io/finance-tracker-bot/
-```
-
-### 4. Настройте бота
-
-В BotFather укажите URL вашего Web App:
-```
-https://YOUR_USERNAME.github.io/finance-tracker-bot/
-```
-
-В файле `backend/.env` обновите:
-```
-TELEGRAM_BOT_TOKEN=your_token_here
-WEB_APP_URL=https://YOUR_USERNAME.github.io/finance-tracker-bot/
-```
+3. **Запусти бота локально или на хостинге**
+   ```bash
+   cd backend
+   python bot.py
+   ```
 
 ## Команды бота
 

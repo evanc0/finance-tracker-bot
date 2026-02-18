@@ -1,5 +1,6 @@
 # Локальные .env файлы
 .env
+backend/.env
 
 # Python
 __pycache__/
@@ -29,3 +30,5 @@ Thumbs.db
 # База данных
 *.db
 *.sqlite3
+finance_tracker.db
+backend/finance_tracker.db
