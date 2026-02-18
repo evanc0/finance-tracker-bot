@@ -100,10 +100,21 @@ function App() {
             name: formData.name,
             balance: parseFloat(formData.balance)
           }))
-          tg.close()
+          // Не закрываем приложение, а просто закрываем модалку
+          closeModal()
+          tg.showPopup({
+            title: 'Успешно',
+            message: 'Счёт успешно создан!'
+          })
+          // Перезагружаем данные
+          fetchUserData(userId)
         }
       } catch (error) {
         console.error('Ошибка создания счёта:', error)
+        tg.showAlert({
+          title: 'Ошибка',
+          message: 'Не удалось создать счёт'
+        })
       }
     } else if (activeModal === 'expense' || activeModal === 'income') {
       if (!formData.amount || !formData.account_id || !formData.category) return
@@ -132,23 +143,23 @@ function App() {
             category: formData.category,
             description: formData.description
           }))
-          tg.close()
+          // Не закрываем приложение, а просто закрываем модалку
+          closeModal()
+          tg.showPopup({
+            title: 'Успешно',
+            message: `Операция успешно ${activeModal === 'expense' ? 'создана' : 'создана'}!`
+          })
+          // Перезагружаем данные
+          fetchUserData(userId)
         }
       } catch (error) {
         console.error('Ошибка создания транзакции:', error)
+        tg.showAlert({
+          title: 'Ошибка',
+          message: 'Не удалось создать операцию'
+        })
       }
     }
-
-    setActiveModal(null)
-    setFormData({
-      type: 'expense',
-      amount: '',
-      account_id: userData?.accounts[0]?.id?.toString() || '',
-      category: '',
-      description: '',
-      name: '',
-      balance: ''
-    })
   }
 
   const openModal = (modalType) => {
