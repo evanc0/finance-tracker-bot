@@ -283,13 +283,12 @@ function App() {
         if (response.ok) {
           showSnackbar('Операция обновлена!')
           fetchUserData(userId)
+          closeModal()
         }
       } catch (error) {
         console.error('Ошибка обновления операции:', error)
         showSnackbar('Не удалось обновить операцию', 'error')
       }
-      closeModal()
-      setEditTransaction(null)
     }
 
     setActiveModal(null)
@@ -367,8 +366,15 @@ function App() {
     const categories = Object.keys(expensesByCategory)
     const values = Object.values(expensesByCategory)
 
+    // Используем дефолтные категории для имён
+    const getCategoryNameDefault = (categoryId) => {
+      const allDefault = [...DEFAULT_CATEGORIES.expense]
+      const cat = allDefault.find(c => c.id === categoryId)
+      return cat?.name || categoryId
+    }
+
     return {
-      labels: categories.map(cat => getCategoryName(cat, 'expense')),
+      labels: categories.map(cat => getCategoryNameDefault(cat)),
       datasets: [{
         data: values,
         backgroundColor: [
