@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Pie } from 'react-chartjs-2'
 
@@ -104,6 +104,18 @@ function App() {
   const getAllCategories = (type) => {
     const dbCategories = userData?.categories?.filter(c => c.type === type) || []
     return [...DEFAULT_CATEGORIES[type], ...dbCategories]
+  }
+
+  const getCategoryIcon = (categoryId, type) => {
+    const categories = getAllCategories(type)
+    const category = categories.find(c => c.id === categoryId)
+    return category?.icon || '📝'
+  }
+
+  const getCategoryName = (categoryId, type) => {
+    const categories = getAllCategories(type)
+    const category = categories.find(c => c.id === categoryId)
+    return category?.name || categoryId
   }
 
   const addCustomCategory = async (userId, type, name, icon) => {
@@ -315,8 +327,8 @@ function App() {
     })
   }
 
-  const calculateStats = () => {
-    if (!userData) return { totalBalance: 0, totalIncome: 0, totalExpense: 0 }
+  const stats = useMemo(() => {
+    if (!userData) return { totalBalance: 0, totalIncome: 0, totalExpense: 0, filteredTransactions: [] }
 
     const totalBalance = userData.accounts.reduce((sum, acc) => sum + parseFloat(acc.balance), 0)
 
@@ -336,21 +348,9 @@ function App() {
       .reduce((sum, t) => sum + parseFloat(t.amount), 0)
 
     return { totalBalance, totalIncome, totalExpense, filteredTransactions }
-  }
+  }, [userData, dateFilter.start, dateFilter.end, typeFilter])
 
-  const getCategoryIcon = (categoryId, type) => {
-    const categories = getAllCategories(type)
-    const category = categories.find(c => c.id === categoryId)
-    return category?.icon || '📝'
-  }
-
-  const getCategoryName = (categoryId, type) => {
-    const categories = getAllCategories(type)
-    const category = categories.find(c => c.id === categoryId)
-    return category?.name || categoryId
-  }
-
-  const getChartData = () => {
+  const chartData = useMemo(() => {
     if (!userData) return { labels: [], datasets: [] }
 
     // Фильтруем транзакции по датам
@@ -376,9 +376,8 @@ function App() {
         ]
       }]
     }
-  }
+  }, [userData, dateFilter.start, dateFilter.end])
 
-  const stats = calculateStats()
   const currency = userData?.user?.currency || 'RUB'
   const userId = tg.initDataUnsafe?.user?.id || 123456789
 
@@ -495,7 +494,7 @@ function App() {
         <h2>📈 Расходы по категориям</h2>
         {userData?.transactions?.some(t => t.type === 'expense') ? (
           <div className="chart-container">
-            <Pie data={getChartData()} options={{ responsive: true, maintainAspectRatio: false }} />
+            <Pie data={chartData} options={{ responsive: true, maintainAspectRatio: false }} />
           </div>
         ) : (
           <div className="empty-state">
