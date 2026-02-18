@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Pie } from 'react-chartjs-2'
 
@@ -101,22 +101,22 @@ function App() {
     setTimeout(() => setSnackbar({ open: false, message: '', type: 'success' }), 3000)
   }
 
-  const getAllCategories = (type) => {
+  const getAllCategories = useCallback((type) => {
     const dbCategories = userData?.categories?.filter(c => c.type === type) || []
     return [...DEFAULT_CATEGORIES[type], ...dbCategories]
-  }
+  }, [userData?.categories])
 
-  const getCategoryIcon = (categoryId, type) => {
+  const getCategoryIcon = useCallback((categoryId, type) => {
     const categories = getAllCategories(type)
     const category = categories.find(c => c.id === categoryId)
     return category?.icon || '📝'
-  }
+  }, [getAllCategories])
 
-  const getCategoryName = (categoryId, type) => {
+  const getCategoryName = useCallback((categoryId, type) => {
     const categories = getAllCategories(type)
     const category = categories.find(c => c.id === categoryId)
     return category?.name || categoryId
-  }
+  }, [getAllCategories])
 
   const addCustomCategory = async (userId, type, name, icon) => {
     try {
@@ -363,18 +363,28 @@ function App() {
       expensesByCategory[t.category] = (expensesByCategory[t.category] || 0) + parseFloat(t.amount)
     })
 
-    const categories = Object.keys(expensesByCategory)
+    const categoryIds = Object.keys(expensesByCategory)
     const values = Object.values(expensesByCategory)
 
-    // Используем дефолтные категории для имён
-    const getCategoryNameDefault = (categoryId) => {
-      const allDefault = [...DEFAULT_CATEGORIES.expense]
-      const cat = allDefault.find(c => c.id === categoryId)
-      return cat?.name || categoryId
-    }
+    // Собираем все категории (дефолтные + кастомные) для имён
+    const customCategories = userData.categories?.filter(c => c.type === 'expense') || []
+    const allCategoriesMap = {}
+    
+    // Добавляем дефолтные
+    DEFAULT_CATEGORIES.expense.forEach(cat => {
+      allCategoriesMap[cat.id] = cat.name
+    })
+    
+    // Добавляем кастомные
+    customCategories.forEach(cat => {
+      allCategoriesMap[cat.id] = cat.name
+    })
+
+    // Получаем имена категорий
+    const labels = categoryIds.map(id => allCategoriesMap[id] || id)
 
     return {
-      labels: categories.map(cat => getCategoryNameDefault(cat)),
+      labels,
       datasets: [{
         data: values,
         backgroundColor: [
