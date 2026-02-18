@@ -8,6 +8,8 @@ const tg = window.Telegram.WebApp
 tg.ready()
 tg.expand()
 
+import { API_URL } from './config'
+
 const DEFAULT_CATEGORIES = {
   income: [
     { id: 'salary', name: 'Зарплата', icon: '💰' },
@@ -75,7 +77,7 @@ function App() {
 
   const fetchUserData = async (telegramId) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/user/${telegramId}`)
+      const response = await fetch(`${API_URL}/api/user/${telegramId}`)
       if (response.ok) {
         const data = await response.json()
         setUserData(data)
@@ -124,7 +126,7 @@ function App() {
   const deleteAccount = async (accountId, accountName) => {
     const userId = tg.initDataUnsafe?.user?.id || 123456789
     try {
-      const response = await fetch(`http://localhost:8000/api/accounts/${accountId}`, {
+      const response = await fetch(`${API_URL}/api/accounts/${accountId}`, {
         method: 'DELETE'
       })
       if (response.ok) {
@@ -154,7 +156,7 @@ function App() {
       if (!formData.name || !formData.balance) return
 
       try {
-        const response = await fetch('http://localhost:8000/api/accounts', {
+        const response = await fetch(`${API_URL}/api/accounts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -182,7 +184,7 @@ function App() {
       if (!formData.amount || !formData.account_id || !formData.category) return
 
       try {
-        const response = await fetch('http://localhost:8000/api/transactions', {
+        const response = await fetch(`${API_URL}/api/transactions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
