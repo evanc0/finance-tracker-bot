@@ -5,6 +5,7 @@ from sqlalchemy.types import Numeric
 from datetime import datetime
 import enum
 from decimal import Decimal
+import os
 
 Base = declarative_base()
 
@@ -14,29 +15,29 @@ class TransactionType(enum.Enum):
 
 class User(Base):
     __tablename__ = 'users'
-    
+
     telegram_id = Column(Integer, primary_key=True)
     currency = Column(String(3), default='RUB')
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     accounts = relationship("Account", back_populates="user", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="user", cascade="all, delete-orphan")
 
 class Account(Base):
     __tablename__ = 'accounts'
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey('users.telegram_id'))
     name = Column(String(50), nullable=False)
     balance = Column(Numeric(10, 2), default=0.00)
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     user = relationship("User", back_populates="accounts")
     transactions = relationship("Transaction", back_populates="account")
 
 class Transaction(Base):
     __tablename__ = 'transactions'
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey('users.telegram_id'))
     account_id = Column(Integer, ForeignKey('accounts.id'))
@@ -45,12 +46,29 @@ class Transaction(Base):
     category = Column(String(50), nullable=False)
     description = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     user = relationship("User", back_populates="transactions")
     account = relationship("Account", back_populates="transactions")
 
-def init_db(database_url: str = "sqlite:///./finance_tracker.db"):
-    engine = create_engine(database_url, connect_args={"check_same_thread": False})
+def init_db(database_url: str = None):
+    # Получаем URL из переменных окружения или используем SQLite по умолчанию
+    if database_url is None:
+        database_url = os.environ.get("DATABASE_URL", "sqlite:///./finance_tracker.db")
+    
+    # Настройки для PostgreSQL
+    if database_url.startswith("postgresql://") or database_url.startswith("postgres://"):
+        engine = create_engine(
+            database_url,
+            pool_pre_ping=True,
+            pool_recycle=300
+        )
+    else:
+        # Настройки для SQLite
+        engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False}
+        )
+    
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     return SessionLocal

@@ -6,7 +6,7 @@
 // 3. Вставь URL ниже вместо localhost:8000
 // 4. Пересобери frontend: npm run build && npm run deploy
 
-export const API_URL = 'http://localhost:8000'
+export const API_URL = 'https://finance-tracker-bot-1.onrender.com'
 
 // Пример для Render:
 // export const API_URL = 'https://finance-tracker-api.onrender.com'

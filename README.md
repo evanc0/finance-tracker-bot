@@ -72,30 +72,47 @@ npm run build
    - Нажми "Sign up with GitHub"
    - Авторизуйся через GitHub
 
-2. **Создай новый Web Service**
+2. **Создай PostgreSQL базу данных**
+   - Нажми "New +" → "PostgreSQL"
+   - **Name**: `finance-tracker-db`
+   - **Region**: Frankfurt (должен совпадать с регионом сервиса)
+   - **Database**: `render` (или любое имя)
+   - **Plan**: **Free** (1 ГБ данных)
+   - Нажми "Create database"
+   - После создания скопируй **Internal Database URL** (начинается с `postgres://`)
+
+3. **Создай новый Web Service**
    - Нажми "New +" → "Web Service"
    - Выбери "Connect a repository"
    - Найди свой репозиторий `finance-tracker-bot`
 
-3. **Настрой сервис**
+4. **Настрой сервис**
    - **Name**: `finance-tracker-api` (или любое имя)
-   - **Region**: Frankfurt (ближе к Европе)
+   - **Region**: Frankfurt (должен совпадать с PostgreSQL)
    - **Branch**: `main`
    - **Root Directory**: `backend`
    - **Runtime**: `Python 3`
    - **Build Command**: `pip install -r requirements.txt`
    - **Start Command**: `uvicorn api:app --host 0.0.0.0 --port $PORT`
 
-4. **Выбери тариф**
+5. **Добавь переменные окружения**
+   - Нажми "Add Environment Variable"
+   - **Key**: `DATABASE_URL`
+   - **Value**: вставь Internal Database URL из PostgreSQL
+   - Нажми "Save"
+
+6. **Выбери тариф**
    - Выбери **Free** тариф
 
-5. **Нажми "Create Web Service"**
+7. **Нажми "Create Web Service"**
    - Дождись завершения деплоя (2-5 минут)
    - Скопируй URL сервиса (например: `https://finance-tracker-api.onrender.com`)
 
-6. **Проверь API**
+8. **Проверь API**
    - Открой в браузере: `https://your-api.onrender.com/api/user/123456`
    - Должен вернуться JSON с данными
+
+> **Важно:** Данные теперь сохраняются в PostgreSQL и не теряются при перезапуске!
 
 ### Часть 2: Обновление frontend
 
