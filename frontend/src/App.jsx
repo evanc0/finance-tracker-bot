@@ -122,18 +122,15 @@ function App() {
   }, [getAllCategories])
 
   const addCustomCategory = async (userId, type, name, icon) => {
-    console.log('Adding category:', { userId, type, name, icon })
     try {
       const response = await fetch(`${API_URL}/api/categories`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, name, icon, type })
       })
-      console.log('Category API response:', response.status)
       if (response.ok) {
         showSnackbar('Категория добавлена!')
         await fetchUserData(userId)
-        console.log('User data after adding category:', userData)
       }
     } catch (error) {
       console.error('Ошибка добавления категории:', error)
@@ -472,8 +469,8 @@ function App() {
               </>
             ) : activeModal === 'manage_categories' ? (
               <div className="manage-categories">
-                <div className="category-section"><h3>Доходы</h3><div className="category-list">{getAllCategories('income').map(cat => (<div key={cat.id} className="category-item"><span>{cat.icon} {cat.name}</span>{!['salary','freelance','investments','gift','other_income'].some(id => cat.id.startsWith(id)) && (<button className="delete-category-btn" onClick={() => deleteCustomCategory(userId, cat.id)}>🗑️</button>)}</div>))}</div></div>
-                <div className="category-section"><h3>Расходы</h3><div className="category-list">{getAllCategories('expense').map(cat => (<div key={cat.id} className="category-item"><span>{cat.icon} {cat.name}</span>{!['food','transport','shopping','entertainment','health','utilities','education','other_expense'].some(id => cat.id.startsWith(id)) && (<button className="delete-category-btn" onClick={() => deleteCustomCategory(userId, cat.id)}>🗑️</button>)}</div>))}</div></div>
+                <div className="category-section"><h3>Доходы</h3><div className="category-list">{getAllCategories('income').map(cat => (<div key={cat.id} className="category-item"><span>{cat.icon} {cat.name}</span>{typeof cat.id === 'number' && (<button className="delete-category-btn" onClick={() => deleteCustomCategory(userId, cat.id)}>🗑️</button>)}</div>))}</div></div>
+                <div className="category-section"><h3>Расходы</h3><div className="category-list">{getAllCategories('expense').map(cat => (<div key={cat.id} className="category-item"><span>{cat.icon} {cat.name}</span>{typeof cat.id === 'number' && (<button className="delete-category-btn" onClick={() => deleteCustomCategory(userId, cat.id)}>🗑️</button>)}</div>))}</div></div>
                 <button className="btn btn-primary" onClick={() => openModal('add_category')}>+ Добавить категорию</button>
               </div>
             ) : activeModal === 'edit_transaction' ? (
