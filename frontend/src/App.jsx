@@ -111,13 +111,13 @@ function App() {
 
   const getCategoryIcon = useCallback((categoryId, type) => {
     const categories = getAllCategories(type)
-    const category = categories.find(c => c.id === categoryId)
+    const category = categories.find(c => String(c.id) === String(categoryId))
     return category?.icon || '📝'
   }, [getAllCategories])
 
   const getCategoryName = useCallback((categoryId, type) => {
     const categories = getAllCategories(type)
-    const category = categories.find(c => c.id === categoryId)
+    const category = categories.find(c => String(c.id) === String(categoryId))
     return category?.name || categoryId
   }, [getAllCategories])
 
@@ -329,9 +329,9 @@ function App() {
     const categoryIds = Object.keys(expensesByCategory)
     const customCategories = userData.categories?.filter(c => c.type === 'expense') || []
     const allCategoriesMap = {}
-    DEFAULT_CATEGORIES.expense.forEach(cat => { allCategoriesMap[cat.id] = cat.name })
-    customCategories.forEach(cat => { allCategoriesMap[cat.id] = cat.name })
-    const labels = categoryIds.map(id => allCategoriesMap[id] || id)
+    DEFAULT_CATEGORIES.expense.forEach(cat => { allCategoriesMap[String(cat.id)] = cat.name })
+    customCategories.forEach(cat => { allCategoriesMap[String(cat.id)] = cat.name })
+    const labels = categoryIds.map(id => allCategoriesMap[String(id)] || id)
     return {
       labels,
       datasets: [{ data: Object.values(expensesByCategory), backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#C9CBCF', '#4CAF50'] }]
