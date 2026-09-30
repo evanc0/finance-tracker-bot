@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, BarElement } from 'chart.js'
 import { Pie } from 'react-chartjs-2'
 
@@ -60,6 +60,12 @@ function App() {
   })
   const [typeFilter, setTypeFilter] = useState('all')
   const [editTransaction, setEditTransaction] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  // Ссылки блокируют повторный запуск синхронно: setState срабатывает
+  // только после перерисовки и сам по себе не защищает от двойного клика.
+  const submittingRef = useRef(false)
+  const deletingRef = useRef(false)
   const [formData, setFormData] = useState({
     type: 'expense',
     amount: '',
@@ -170,7 +176,38 @@ function App() {
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
+  // Кнопка блокируется на время запроса: к Google Таблице он идёт не мгновенно,
+  // и без этого можно случайно создать одну и ту же операцию несколько раз.
   const handleSubmit = async () => {
+    if (submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
+    try {
+      await performSubmit()
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
+  }
+
+  const handleConfirmDelete = async () => {
+    if (deletingRef.current || !confirmDelete) return
+    const target = confirmDelete
+    deletingRef.current = true
+    setDeleting(true)
+    try {
+      if (target.name) {
+        await deleteAccount(target.id, target.name)
+      } else if (target.id) {
+        await deleteTransaction(target.id)
+      }
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
+    }
+  }
+
+  const performSubmit = async () => {
     const userId = tg.initDataUnsafe?.user?.id || 123456789
 
     if (activeModal === 'create_account') {
@@ -214,7 +251,7 @@ function App() {
       }
     } else if (activeModal === 'add_category') {
       if (!formData.newCategoryName) return
-      addCustomCategory(userId, formData.type, formData.newCategoryName, formData.newCategoryIcon)
+      await addCustomCategory(userId, formData.type, formData.newCategoryName, formData.newCategoryIcon)
       closeModal()
     } else if (activeModal === 'edit_transaction' && editTransaction) {
       if (!formData.amount || !formData.category) return
@@ -461,7 +498,11 @@ function App() {
             )}
             <div className="btn-group">
               <button className="btn btn-secondary" onClick={closeModal}>Отмена</button>
-              {activeModal !== 'manage_categories' && (<button className="btn btn-primary" onClick={handleSubmit}>{activeModal === 'edit_transaction' ? 'Сохранить' : 'Создать'}</button>)}
+              {activeModal !== 'manage_categories' && (
+                <button className="btn btn-primary" onClick={handleSubmit} disabled={submitting}>
+                  {submitting ? 'Сохранение…' : activeModal === 'edit_transaction' ? 'Сохранить' : 'Создать'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -478,7 +519,9 @@ function App() {
             ) : null}
             <div className="btn-group">
               <button className="btn btn-secondary" onClick={() => setConfirmDelete(null)}>Отмена</button>
-              <button className="btn btn-primary" onClick={() => { if (confirmDelete.name) { deleteAccount(confirmDelete.id, confirmDelete.name) } else if (confirmDelete.id && !confirmDelete.name) { deleteTransaction(confirmDelete.id) } }}>Удалить</button>
+              <button className="btn btn-primary" onClick={handleConfirmDelete} disabled={deleting}>
+                {deleting ? 'Удаление…' : 'Удалить'}
+              </button>
             </div>
           </div>
         </div>
