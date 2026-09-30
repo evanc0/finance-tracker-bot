@@ -39,8 +39,14 @@ const getEndOfMonth = (date) => {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0)
 }
 
+// Форматируем по локальным компонентам даты, а не через toISOString():
+// иначе локальная полночь уезжает в предыдущий день для часовых поясов восточнее UTC
+// (например, конец месяца превращался в 29-е число вместо 30-го).
 const formatDate = (date) => {
-  return date.toISOString().split('T')[0]
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function App() {
@@ -267,7 +273,7 @@ function App() {
     if (!userData) return { totalBalance: 0, totalIncome: 0, totalExpense: 0, filteredTransactions: [] }
     const totalBalance = userData.accounts.reduce((sum, acc) => sum + parseFloat(acc.balance), 0)
     const filteredTransactions = userData.transactions.filter(t => {
-      const transDate = new Date(t.created_at).toISOString().split('T')[0]
+      const transDate = formatDate(new Date(t.created_at))
       const inDateRange = transDate >= dateFilter.start && transDate <= dateFilter.end
       const typeMatch = typeFilter === 'all' || t.type === typeFilter
       return inDateRange && typeMatch
@@ -280,7 +286,7 @@ function App() {
   const chartData = useMemo(() => {
     if (!userData) return { labels: [], datasets: [] }
     const filteredTransactions = userData.transactions.filter(t => {
-      const transDate = new Date(t.created_at).toISOString().split('T')[0]
+      const transDate = formatDate(new Date(t.created_at))
       return transDate >= dateFilter.start && transDate <= dateFilter.end && t.type === 'expense'
     })
     const expensesByCategory = {}
