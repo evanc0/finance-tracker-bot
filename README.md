@@ -1,282 +1,358 @@
 # Telegram-бот для учёта финансов
 
-Приложение состоит из Telegram-бота с Web App интерфейсом для управления финансами.
+Telegram Web App для учёта доходов и расходов. Данные лежат в обычной **Google
+Таблице**: их всегда видно глазами, можно править руками и вешать свои формулы.
+Отдельный сервер не нужен — API живёт в Apps Script, привязанном к этой же
+таблице.
+
+---
+
+## Как это работает
+
+```
+Telegram Web App (React, GitHub Pages)
+        │  POST  {action, payload, initData}
+        ▼
+Apps Script Web App (apps-script/Code.gs)  ──►  Google Таблица (листы)
+        ▲
+        │  long polling
+Telegram-бот (backend/bot.py, Python)  ──────►  та же таблица (сервисный аккаунт)
+```
+
+Три независимые части:
+
+1. **Frontend** — React-приложение, которое Telegram открывает внутри себя.
+   Оно не хранит данные, а только показывает их и отправляет действия.
+2. **API** — Apps Script, который читает и пишет листы таблицы. Он же проверяет,
+   что запрос пришёл именно из Telegram, а не от случайного человека со ссылкой.
+3. **Бот** — отдельный Python-процесс. Он нужен для команды `/start` (кнопка
+   запуска Web App) и для `/stats` и `/backup`. Бот работает напрямую с таблицей
+   через сервисный аккаунт, минуя Apps Script.
+
+Почему так: ключ доступа к таблице нельзя класть во фронтенд — сборка на GitHub
+Pages публичная, её прочитает любой. Поэтому фронтенд обращается к Apps Script, а
+тот уже работает с таблицей от твоего имени.
+
+---
 
 ## Структура проекта
 
 ```
 finance-tracker-bot/
 ├── apps-script/
-│   └── Code.gs         # API для Google Таблицы (вариант без сервера)
-├── backend/            # нужен только для запуска бота / варианта с Render
-│   ├── bot.py          # Telegram бот
-│   ├── api.py          # FastAPI сервер
-│   ├── database.py     # Слой доступа к Google Sheets (gspread)
+│   └── Code.gs           # API для Google Таблицы (основной вариант, без сервера)
+├── backend/              # нужен только для бота и варианта со своим сервером
+│   ├── bot.py            # Telegram-бот: /start, /stats, /backup, приём Web App
+│   ├── api.py            # FastAPI-сервер (альтернатива Apps Script)
+│   ├── database.py       # Доступ к Google Sheets через gspread
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/
     ├── src/
-    │   ├── App.jsx     # Основное React-приложение
-    │   ├── api.js      # Вызовы API (Apps Script)
-    │   ├── main.jsx    # Точка входа
-    │   └── index.css   # Стили
+    │   ├── App.jsx       # Всё React-приложение: экраны, формы, диаграмма
+    │   ├── api.js        # callApi() — единственная точка выхода в сеть
+    │   ├── config.js     # API_URL и API_TOKEN
+    │   ├── main.jsx      # Точка входа
+    │   └── index.css     # Стили (используют переменные темы Telegram)
     ├── index.html
     ├── package.json
-    └── vite.config.js
+    └── vite.config.js    # base: '/finance-tracker-bot/'
 ```
 
-## Развёртывание API в Apps Script (рекомендуемый вариант)
+---
 
-Здесь не нужны ни Render, ни сервисный аккаунт, ни JSON-ключ: код живёт прямо
-внутри Google Таблицы и работает от твоего имени.
+## Хранение данных
 
-1. Открой свою Google Таблицу → **Расширения → Apps Script**.
-2. Удали содержимое `Code.gs` и вставь код из [`apps-script/Code.gs`](apps-script/Code.gs).
-3. Открой **Свойства скрипта** (⚙️ Project Settings → Script properties) и добавь:
-   - `BOT_TOKEN` — токен бота от BotFather. Если задан, запросы с `initData`
-     проверяются по подписи Telegram, а `telegram_id` берётся из подписанных
-     данных, а не из тела запроса.
-   - `API_TOKEN` — необязательный общий секрет для запросов без `initData`.
-   - `SPREADSHEET_ID` — нужен только если скрипт **не** привязан к таблице.
-4. **Развернуть → Новое развёртывание**:
+Apps Script и бот сами создают листы, если их нет. Структура:
+
+| Лист | Колонки |
+|---|---|
+| `users` | `telegram_id`, `currency`, `created_at` |
+| `accounts` | `id`, `user_id`, `name`, `balance`, `created_at` |
+| `categories` | `id`, `user_id`, `name`, `icon`, `type`, `created_at` |
+| `transactions` | `id`, `user_id`, `account_id`, `type`, `amount`, `category`, `description`, `created_at` |
+
+Несколько важных моментов:
+
+- **Не переименовывай заголовки и не меняй их порядок** — код читает строки по
+  именам колонок из первой строки листа.
+- `id` считается как «максимальный существующий + 1». Удалённые номера повторно
+  не используются.
+- `type` — строка `income` или `expense`.
+- `category` хранит идентификатор категории (`food`, `salary` или `id`
+  пользовательской), а не её название. Названия и иконки подставляются на
+  фронтенде.
+- `created_at` записывается в часовом поясе таблицы. Менять формат колонки
+  вручную не стоит.
+- Баланс счёта меняется на сервере при каждой операции, поэтому он всегда
+  согласован с историей. Если правишь строки в таблице руками, пересчитай
+  баланс сам.
+
+---
+
+## Быстрый старт
+
+### Шаг 1. Google Таблица и Apps Script
+
+1. Создай пустую таблицу на https://sheets.google.com. Листы создавать вручную
+   не надо — API добавит их сам при первом запросе.
+2. В таблице открой **Расширения → Apps Script**.
+3. Удали содержимое `Code.gs` и вставь код из [`apps-script/Code.gs`](apps-script/Code.gs)
+   (на странице файла на GitHub есть кнопка **Raw** — так удобнее копировать),
+   затем **Ctrl+S**.
+4. Открой **Свойства скрипта** (⚙️ Project Settings → Script properties) и добавь:
+
+   | Свойство | Обязательно | Зачем |
+   |---|---|---|
+   | `BOT_TOKEN` | да | Токен бота от BotFather. Включает проверку подписи Telegram и защищает данные |
+   | `API_TOKEN` | нет | Общий секрет для запросов без `initData` (например, из скрипта) |
+   | `SPREADSHEET_ID` | нет | Нужен только если скрипт **не** привязан к таблице |
+
+5. **Развернуть → Новое развёртывание**:
    - тип: **Веб-приложение**;
    - **Запуск от имени**: Я;
    - **У кого есть доступ**: Все;
-   - нажми **Развернуть**.
-5. Скопируй URL развёртывания (заканчивается на `/exec`) и вставь его
-   в `frontend/src/config.js` → `API_URL`.
-6. Пересобери и опубликуй фронтенд:
+   - **Развернуть** и разреши доступ, если Google спросит.
+6. Скопируй URL развёртывания — он заканчивается на `/exec`.
 
-   ```bash
-   cd frontend
-   npm run build
-   npm run deploy
-   ```
+Проверка: открой этот URL в браузере. Должно вернуться
+`{"ok":true,"data":{"message":"Finance Tracker API работает","version":1}}`.
 
-Проверка: открой URL в браузере — должно вернуться `{"ok":true,...}`.
+> **Важно.** После любой правки кода скрипта нужно сделать
+> **Развернуть → Управление развёртываниями → ✏️ → Версия: Новая версия →
+> Развернуть**. Если нажать «Новое развёртывание», получишь другой URL и фронт
+> отвалится. «Управление развёртываниями» сохраняет адрес.
 
-> **Важно:** после правки кода нужно сделать
-> **Развернуть → Управление развёртываниями → ✏️ → Версия: Новая версия → Развернуть**.
-> Без этого тот же URL продолжит отдавать старый код.
+### Шаг 2. Frontend
 
-Ограничения Apps Script: ~6 минут на один запуск и ~90 минут суммарного времени
-в сутки для обычного Google-аккаунта, поэтому ссылку на веб-приложение лучше
-никому не показывать и включить проверку по `BOT_TOKEN`.
+1. В `frontend/src/config.js` укажи свой URL:
 
-## Установка и запуск
-
-### 1. Backend
-
-```bash
-cd backend
-
-# Создать виртуальное окружение
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
-
-# Установить зависимости
-pip install -r requirements.txt
-
-# Создать файл .env и настроить
-copy .env.example .env
-# Отредактировать .env, добавив токен бота и URL Web App
-
-# Запустить API сервер (в отдельном терминале)
-python api.py
-
-# Запустить бота (в другом терминале)
-python bot.py
-```
-
-### 2. Frontend
-
-```bash
-cd frontend
-
-# Установить зависимости
-npm install
-
-# Запустить dev-сервер
-npm run dev
-
-# Собрать для продакшена
-npm run build
-```
-
-## Публикация на GitHub Pages и Render (альтернатива)
-
-> **Это запасной вариант.** Основной путь — Apps Script (см. выше): там не нужны
-> ни Render, ни сервисный аккаунт. Раздел ниже актуален, если ты сознательно
-> хочешь держать отдельный сервер (например, чтобы запускать на нём бота).
-> В этом случае в `frontend/src/config.js` укажи адрес Render вместо адреса
-> Apps Script.
-
-> **База данных — Google Таблица.** Проект хранит данные в Google Sheets через сервисный
-> аккаунт (модуль `backend/database.py`, библиотека `gspread`). PostgreSQL и SQLite больше
-> не используются. При первом запуске API обязательно задай `SPREADSHEET_ID` и
-> `GOOGLE_CREDENTIALS` (см. ниже), иначе сервер не стартует.
-
-### Часть 1: Google Таблица и API на Render (бесплатно)
-
-#### 1.1. Подготовь Google Таблицу
-
-1. Создай пустую таблицу на https://sheets.google.com (например, `finance-tracker`).
-   Листы создавать вручную не нужно: при первом запуске API сам добавит листы
-   `users`, `accounts`, `categories`, `transactions` с заголовками.
-2. Скопируй **ID таблицы** из адресной строки:
-   `https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit`
-
-#### 1.2. Создай сервисный аккаунт Google
-
-1. Открой https://console.cloud.google.com/ и создай проект.
-2. **APIs & Services → Library** → найди и включи **Google Sheets API**
-   (на всякий случай включи и **Google Drive API**).
-3. **APIs & Services → Credentials → Create Credentials → Service account** →
-   задай имя → **Create and continue** → **Done**.
-4. Открой созданный аккаунт → вкладка **Keys** → **Add key → Create new key → JSON**.
-   Скачается файл с ключом — никому его не передавай.
-5. В файле ключа найди поле `client_email`
-   (например, `finance-bot@project.iam.gserviceaccount.com`) и добавь этот email
-   в Google Таблице через **Поделиться** с правами **Редактор**.
-   Без этого шага API получит ошибку доступа.
-
-#### 1.3. Задеплой API на Render
-
-1. **Зарегистрируйся на Render**
-   - Перейди на https://render.com
-   - Нажми "Sign up with GitHub"
-   - Авторизуйся через GitHub
-
-2. **Создай новый Web Service**
-   - Нажми "New +" → "Web Service"
-   - Выбери "Connect a repository"
-   - Найди свой репозиторий `finance-tracker-bot`
-
-3. **Настрой сервис**
-   - **Name**: `finance-tracker-api` (или любое имя)
-   - **Region**: Frankfurt
-   - **Branch**: `main`
-   - **Root Directory**: `backend`
-   - **Runtime**: `Python 3`
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `uvicorn api:app --host 0.0.0.0 --port $PORT`
-
-4. **Добавь переменные окружения**
-   - `SPREADSHEET_ID` — ID таблицы из шага 1.1
-   - `GOOGLE_CREDENTIALS` — всё содержимое JSON-ключа одной строкой
-     (либо в base64: `base64 -w0 service_account.json`)
-   - `TELEGRAM_BOT_TOKEN` и `WEB_APP_URL` — если этот же сервис запускает бота
-   - Нажми "Save"
-
-5. **Выбери тариф**
-   - Выбери **Free** тариф
-
-6. **Нажми "Create Web Service"**
-   - Дождись завершения деплоя (2-5 минут)
-   - Скопируй URL сервиса (например: `https://finance-tracker-api.onrender.com`)
-
-7. **Проверь API**
-   - Открой в браузере: `https://your-api.onrender.com/api/user/123456`
-   - Должен вернуться JSON с данными
-
-> **Важно:** данные лежат в твоей Google Таблице и не теряются при перезапуске Render.
-> Бот (`bot.py`) использует ту же таблицу — запускай его отдельным сервисом/процессом
-> с теми же переменными окружения.
-
-### Часть 2: Обновление frontend
-
-1. **Обнови `frontend/src/config.js`**
    ```javascript
-   export const API_URL = 'https://your-api.onrender.com'
+   export const API_URL = 'https://script.google.com/macros/s/.../exec'
+   export const API_TOKEN = '' // заполни, только если задал API_TOKEN в свойствах скрипта
    ```
 
-2. **Пересобери и задеплой**
+2. Установи зависимости и собери:
+
    ```bash
    cd frontend
-   npm run build
-   npm run deploy
+   npm install
+   npm run dev      # локальная разработка на http://localhost:5173
+   npm run build    # сборка в dist/
+   npm run deploy   # сборка + публикация в ветку gh-pages
    ```
 
-### Часть 3: GitHub Pages для frontend
+3. Включи GitHub Pages: **Settings → Pages** → Source: **Deploy from a branch** →
+   Branch: **gh-pages**, папка **/ (root)**.
 
-1. **Включи GitHub Pages**
-   - Зайди в настройки репозитория на GitHub
-   - Перейди в раздел **Pages**
-   - Source: **Deploy from a branch**
-   - Branch: **gh-pages** → **/** (root)
+4. Приложение будет доступно по адресу
+   `https://<твой-логин>.github.io/finance-tracker-bot/`.
 
-2. **Frontend будет доступен по адресу**
-   ```
-   https://YOUR_USERNAME.github.io/finance-tracker-bot/
-   ```
+> Если переименуешь репозиторий, поправь `base` в `frontend/vite.config.js` —
+> иначе стили и скрипты не найдутся.
 
-### Часть 4: Настройка бота
+### Шаг 3. Бот
 
-1. **Обнови Web App URL в BotFather**
-   ```
-   https://YOUR_USERNAME.github.io/finance-tracker-bot/
-   ```
+1. В BotFather укажи Web App URL — адрес с шага 2.4.
+2. Создай `backend/.env` по образцу `backend/.env.example`:
 
-2. **Обнови `backend/.env`**
-   ```
-   TELEGRAM_BOT_TOKEN=your_token_here
-   WEB_APP_URL=https://YOUR_USERNAME.github.io/finance-tracker-bot/
+   ```ini
+   TELEGRAM_BOT_TOKEN=токен_от_BotFather
+   WEB_APP_URL=https://<твой-логин>.github.io/finance-tracker-bot/
+   SPREADSHEET_ID=id_таблицы_из_шага_1.1
+   GOOGLE_APPLICATION_CREDENTIALS=./service_account.json
    ```
 
-3. **Запусти бота локально или на хостинге**
+3. Положи рядом файл ключа сервисного аккаунта под именем
+   `backend/service_account.json`. Как его получить — в разделе
+   [«Свой сервер»](#альтернатива-свой-сервер-вместо-apps-script), шаги 1.2.
+   Файл уже добавлен в `.gitignore` — в репозиторий он не попадёт.
+
+4. Установи зависимости и запусти:
+
    ```bash
    cd backend
+   python -m venv venv
+   venv\Scripts\activate        # Windows
+   # source venv/bin/activate   # Linux/macOS
+   pip install -r requirements.txt
    python bot.py
    ```
 
+Бот должен быть запущен постоянно, иначе `/stats` и `/backup` не работают.
+Кнопка Web App работает и без него — она просто открывает сайт из BotFather.
+
+---
+
+## Разработка фронтенда
+
+Есть два способа:
+
+- **Быстро посмотреть вёрстку:** `npm run dev` и открыть `http://localhost:5173`.
+  Учти: вне Telegram `initData` пустой, поэтому при заданном `BOT_TOKEN` API
+  ответит `Запрос должен прийти из Telegram`. Данные не загрузятся — так и должно
+  быть. Для отладки внешнего вида это не мешает.
+- **Проверить реальные запросы:** подними dev-сервер `npm run dev -- --host`,
+  выстави его наружу через `ngrok http 5173` и временно укажи полученный URL
+  в BotFather как Web App URL. Тогда Telegram откроет локальную сборку и передаст
+  настоящий `initData`.
+
+---
+
+## Справочник API
+
+Все запросы — `POST` на URL веб-приложения. Тело — JSON:
+
+```json
+{ "action": "get_user", "payload": { "user_id": 123 }, "initData": "..." }
+```
+
+Каждый ответ имеет вид `{"ok": true, "data": ...}` либо
+`{"ok": false, "error": "текст"}`.
+
+| Действие | payload | Что делает |
+|---|---|---|
+| `get_user` | `user_id` | Создаёт пользователя и счёт «Основной», если их нет. Возвращает счета, последние 50 операций и категории |
+| `create_account` | `user_id`, `name`, `balance` | Новый счёт |
+| `update_account` | `account_id`, `name?`, `balance?` | Изменить счёт |
+| `delete_account` | `account_id` | Удалить счёт вместе с его операциями |
+| `create_transaction` | `user_id`, `account_id`, `type`, `amount`, `category`, `description` | Добавить операцию и пересчитать баланс |
+| `update_transaction` | `transaction_id`, `amount?`, `category?`, `description?`, `account_id?` | Изменить операцию, балансы корректируются |
+| `delete_transaction` | `transaction_id` | Удалить операцию и вернуть сумму на счёт |
+| `list_transactions` | `user_id` | Все операции пользователя |
+| `create_category` | `user_id`, `name`, `icon`, `type` | Своя категория |
+| `list_categories` | `user_id` | Список своих категорий |
+| `delete_category` | `category_id` | Удалить категорию |
+| `get_stats` | `user_id` | Итоги: баланс, доходы, расходы, количество |
+
+Когда задан `BOT_TOKEN`, поле `initData` обязательно, а `user_id` берётся из
+подписанных данных Telegram — подменить его в запросе нельзя.
+
+---
+
+## Безопасность
+
+- **`BOT_TOKEN` обязателен.** URL веб-приложения виден в публичной сборке на
+  GitHub Pages, поэтому без проверки подписи любой желающий смог бы читать и
+  менять твои операции, просто подставив `user_id`.
+- Подпись проверяется по схеме Telegram: `HMAC-SHA256` с ключом, производным от
+  токена бота. Подделанная или устаревшая (старше суток) подпись отклоняется.
+- Каждая операция дополнительно проверяется на принадлежность пользователю:
+  чужой `account_id` или `transaction_id` не сработает.
+- Ключ сервисного аккаунта (`service_account.json`) и `.env` перечислены в
+  `.gitignore`. Никогда не коммить их и не вставляй в код.
+
+---
+
+## Ограничения и нюансы
+
+- Apps Script: ~6 минут на один запуск и порядка 90 минут суммарного времени в
+  сутки на обычном Google-аккаунте. Для личного учёта этого с запасом, но это
+  не бесконечный ресурс.
+- Каждый запрос идёт к Google, поэтому занимает примерно 0.5–2 секунды. Кнопки
+  в приложении на время запроса блокируются, чтобы случайно не создать операцию
+  дважды.
+- Google Sheets — не настоящая база: нет транзакций и блокировок. Одновременная
+  запись с двух устройств теоретически может конфликтовать, для одного
+  пользователя это не проблема.
+- Если в твоём регионе `script.google.com` недоступен без VPN, приложение не
+  откроется. Проверить можно так: открой `/exec`-ссылку в браузере — должно
+  вернуться `{"ok":true,...}`.
+
+---
+
+## Альтернатива: свой сервер вместо Apps Script
+
+Нужен, если не хочешь зависеть от Apps Script или хочешь держать бота на том же
+хостинге. В этом случае фронтенд обращается не к Apps Script, а к FastAPI
+(`backend/api.py`), который работает с таблицей через сервисный аккаунт.
+
+### 1.1. Таблица
+
+Создай пустую таблицу на https://sheets.google.com и скопируй её ID из адресной
+строки: `https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit`.
+
+### 1.2. Сервисный аккаунт
+
+1. Открой https://console.cloud.google.com/ и создай проект.
+2. **APIs & Services → Library** → включи **Google Sheets API** и **Google Drive API**.
+3. **APIs & Services → Credentials → Create Credentials → Service account** →
+   имя → **Create and continue** → **Done**.
+4. Открой аккаунт → вкладка **Keys** → **Add key → Create new key → JSON**.
+   Скачается файл ключа — никому его не передавай.
+5. В файле найди `client_email` и добавь этот адрес в Google Таблице через
+   **Поделиться** с правами **Редактор**. Без этого шага будет ошибка доступа.
+
+### 1.3. Запуск
+
+```bash
+cd backend
+pip install -r requirements.txt
+python api.py     # сервер на http://localhost:8000
+python bot.py     # бот, в другом терминале
+```
+
+### 1.4. Деплой на Render
+
+1. Зарегистрируйся на https://render.com через GitHub.
+2. **New + → Web Service** → подключи репозиторий.
+3. Настройки: **Root Directory** `backend`, **Build Command**
+   `pip install -r requirements.txt`, **Start Command**
+   `uvicorn api:app --host 0.0.0.0 --port $PORT`, тариф **Free**.
+4. Переменные окружения на вкладке **Environment**:
+
+   | Ключ | Значение |
+   |---|---|
+   | `SPREADSHEET_ID` | ID таблицы |
+   | `GOOGLE_CREDENTIALS` | Содержимое JSON-ключа одной строкой или в base64 |
+
+   Для base64: `base64 -w0 service_account.json` (Linux/macOS) или
+   `[Convert]::ToBase64String([IO.File]::ReadAllBytes("service_account.json"))`
+   (PowerShell).
+5. В `frontend/src/config.js` укажи адрес Render и пересобери фронт.
+
+Важно: копия таблицы должна быть одна. Не запускай одновременно Apps Script и
+FastAPI на одних и тех же данных — писать в листы должен кто-то один.
+
+---
+
+## Частые проблемы
+
+| Симптом | Причина и решение |
+|---|---|
+| `Запрос должен прийти из Telegram (нет initData)` | Приложение открыто не из Telegram либо устаревшая ссылка. Открой через бота |
+| `Подпись Telegram не прошла проверку` | `BOT_TOKEN` не совпадает с реальным токеном бота |
+| `Нет доступа к Операция` | Пытаешься изменить чужую запись; проверь, что `initData` отправляется |
+| Правки в `Code.gs` не применяются | Нужно **Управление развёртываниями → Новая версия**, одного сохранения мало |
+| `Параметры (String,number[]) не соответствуют сигнатуре` | В скрипте старая версия кода. Обнови `Code.gs` из репозитория |
+| Диаграмма и список операций пустые | Операции вне выбранного периода. Проверь даты в фильтре сверху |
+| `npm run deploy` падает | Нужны права на запись в репозиторий и настроенный git |
+| Страница открывается без стилей | Не совпадает `base` в `vite.config.js` с именем репозитория |
+| Пустой экран в Telegram Desktop, на телефоне работает | Сеть блокирует `script.google.com`; проверь через VPN |
+
+---
+
 ## Команды бота
 
-- `/start` - Запуск бота, открытие Web App
-- `/stats` - Показать статистику по финансам
-- `/backup` - Экспорт данных в CSV
+- `/start` — приветствие и кнопка запуска Web App.
+- `/stats` — сводка: счета, общий баланс, доходы, расходы, число операций.
+- `/backup` — выгрузка всех операций в CSV.
 
 ## Функционал Web App
 
-- ✅ Учёт доходов и расходов
-- ✅ Управление счетами
-- ✅ Категории операций
-- ✅ Статистика и диаграммы
-- ✅ Интеграция с Telegram (Theme, initData)
+- Учёт доходов и расходов, редактирование и удаление операций.
+- Несколько счетов с автоматическим пересчётом баланса.
+- Свои категории с иконками.
+- Фильтр по датам и типу, диаграмма расходов по категориям.
+- Тема оформления и данные пользователя из Telegram.
 
 ## Технологии
 
-**Frontend:**
-- React 18
-- Vite
-- Chart.js (диаграммы)
-- Telegram Web Apps API
+**Frontend:** React 18, Vite, Chart.js, Telegram Web Apps API.
 
-**API (вариант Apps Script):**
-- Google Apps Script Web App (`apps-script/Code.gs`)
-- Google Sheets как хранилище
-- Проверка `initData` по HMAC-SHA256
+**API:**
+- основной вариант — Google Apps Script Web App (`apps-script/Code.gs`),
+  Google Sheets как хранилище, проверка `initData` по HMAC-SHA256;
+- альтернативный — Python, FastAPI, gspread + google-auth.
 
-**Backend (вариант с сервером / для бота):**
-- Python + python-telegram-bot
-- FastAPI (REST API)
-- gspread + google-auth (доступ к Google Таблице)
-- Google Sheets (база данных)
-
-## Локальный запуск с ngrok
-
-Для тестирования Web App локально:
-
-```bash
-# Установить ngrok
-# Запустить API
-python api.py
-
-# Запустить frontend
-npm run dev
-
-# В другом терминале запустить ngrok
-ngrok http 5173
-```
-
-Полученный URL из ngrok укажите в BotFather как Web App URL.
+**Бот:** Python, python-telegram-bot.
