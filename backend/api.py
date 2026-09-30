@@ -1,12 +1,12 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy.orm import Session
 
-from database import init_db, User, Account, Transaction, TransactionType, Category
+import database as store
+from database import init_db
 
 app = FastAPI(title="Finance Tracker API")
 
@@ -18,14 +18,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SessionLocal = init_db()
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+@app.on_event("startup")
+async def on_startup():
+    # Прогреваем подключение к Google Таблице и создаём недостающие листы.
+    init_db()
 
 class AccountCreate(BaseModel):
     user_id: int
@@ -62,16 +59,10 @@ class CategoryResponse(BaseModel):
     icon: str
     type: str
 
-    class Config:
-        from_attributes = True
-
 class AccountResponse(BaseModel):
     id: int
     name: str
     balance: Decimal
-
-    class Config:
-        from_attributes = True
 
 class TransactionResponse(BaseModel):
     id: int
@@ -82,224 +73,102 @@ class TransactionResponse(BaseModel):
     account_id: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 @app.get("/api/user/{telegram_id}")
-async def get_user_data(telegram_id: int, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.telegram_id == telegram_id).first()
-    if not user:
-        # Создаём нового пользователя с основным счётом
-        user = User(telegram_id=telegram_id)
-        db.add(user)
-
-        default_account = Account(user_id=telegram_id, name="Основной", balance=0.00)
-        db.add(default_account)
-        db.commit()
-        db.refresh(user)
-
-    accounts = db.query(Account).filter(Account.user_id == telegram_id).all()
-    transactions = db.query(Transaction).filter(
-        Transaction.user_id == telegram_id
-    ).order_by(Transaction.created_at.desc()).limit(50).all()
-    categories = db.query(Category).filter(Category.user_id == telegram_id).all()
-
-    return {
-        "user": {
-            "telegram_id": user.telegram_id,
-            "currency": user.currency
-        },
-        "accounts": accounts,
-        "transactions": transactions,
-        "categories": categories
-    }
+async def get_user_data(telegram_id: int):
+    return store.get_user_data(telegram_id)
 
 @app.post("/api/accounts", response_model=AccountResponse)
-async def create_account(account: AccountCreate, db: Session = Depends(get_db)):
-    db_account = Account(
+async def create_account(account: AccountCreate):
+    return store.create_account(
         user_id=account.user_id,
         name=account.name,
-        balance=account.balance
+        balance=account.balance,
     )
-    db.add(db_account)
-    db.commit()
-    db.refresh(db_account)
-    return db_account
 
 @app.put("/api/accounts/{account_id}", response_model=AccountResponse)
-async def update_account(account_id: int, account_update: AccountUpdate, db: Session = Depends(get_db)):
-    account = db.query(Account).filter(Account.id == account_id).first()
-    if not account:
+async def update_account(account_id: int, account_update: AccountUpdate):
+    account = store.update_account(
+        account_id=account_id,
+        name=account_update.name,
+        balance=account_update.balance,
+    )
+    if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
-
-    if account_update.name is not None:
-        account.name = account_update.name
-    if account_update.balance is not None:
-        account.balance = account_update.balance
-
-    db.commit()
-    db.refresh(account)
     return account
 
 @app.get("/api/accounts/{user_id}", response_model=List[AccountResponse])
-async def get_accounts(user_id: int, db: Session = Depends(get_db)):
-    return db.query(Account).filter(Account.user_id == user_id).all()
+async def get_accounts(user_id: int):
+    return store.list_accounts(user_id)
 
 @app.delete("/api/accounts/{account_id}")
-async def delete_account(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(Account).filter(Account.id == account_id).first()
-    if not account:
+async def delete_account(account_id: int):
+    if not store.delete_account(account_id):
         raise HTTPException(status_code=404, detail="Account not found")
-
-    db.delete(account)
-    db.commit()
     return {"message": "Account deleted"}
 
 @app.post("/api/transactions", response_model=TransactionResponse)
-async def create_transaction(transaction: TransactionCreate, db: Session = Depends(get_db)):
-    account = db.query(Account).filter(
-        Account.id == transaction.account_id,
-        Account.user_id == transaction.user_id
-    ).first()
+async def create_transaction(transaction: TransactionCreate):
+    try:
+        created = store.create_transaction(
+            user_id=transaction.user_id,
+            account_id=transaction.account_id,
+            transaction_type=transaction.type,
+            amount=transaction.amount,
+            category=transaction.category,
+            description=transaction.description or "",
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
 
-    if not account:
+    if created is None:
         raise HTTPException(status_code=404, detail="Account not found")
-
-    db_transaction = Transaction(
-        user_id=transaction.user_id,
-        account_id=transaction.account_id,
-        type=TransactionType(transaction.type),
-        amount=transaction.amount,
-        category=transaction.category,
-        description=transaction.description
-    )
-
-    if transaction.type == "expense":
-        account.balance -= transaction.amount
-    else:
-        account.balance += transaction.amount
-
-    db.add(db_transaction)
-    db.commit()
-    db.refresh(db_transaction)
-    return db_transaction
+    return created
 
 @app.put("/api/transactions/{transaction_id}", response_model=TransactionResponse)
-async def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db)):
-    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
-    if not transaction:
+async def update_transaction(transaction_id: int, transaction_update: TransactionUpdate):
+    transaction = store.update_transaction(
+        transaction_id=transaction_id,
+        amount=transaction_update.amount,
+        category=transaction_update.category,
+        description=transaction_update.description,
+        account_id=transaction_update.account_id,
+    )
+    if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
-
-    # Если меняем сумму или тип, корректируем баланс счёта
-    if transaction_update.amount is not None and transaction_update.amount != transaction.amount:
-        old_amount = float(transaction.amount)
-        new_amount = float(transaction_update.amount)
-        diff = new_amount - old_amount
-
-        account = db.query(Account).filter(Account.id == transaction.account_id).first()
-        if account:
-            if transaction.type == "expense":
-                account.balance = float(account.balance) - diff
-            else:
-                account.balance = float(account.balance) + diff
-
-    if transaction_update.account_id is not None and transaction_update.account_id != transaction.account_id:
-        # Старый счёт
-        old_account = db.query(Account).filter(Account.id == transaction.account_id).first()
-        if old_account:
-            if transaction.type == "expense":
-                old_account.balance = float(old_account.balance) + float(transaction.amount)
-            else:
-                old_account.balance = float(old_account.balance) - float(transaction.amount)
-
-        # Новый счёт
-        new_account = db.query(Account).filter(Account.id == transaction_update.account_id).first()
-        if new_account:
-            if transaction.type == "expense":
-                new_account.balance = float(new_account.balance) - float(transaction.amount)
-            else:
-                new_account.balance = float(new_account.balance) + float(transaction.amount)
-
-        transaction.account_id = transaction_update.account_id
-
-    if transaction_update.category is not None:
-        transaction.category = transaction_update.category
-    if transaction_update.description is not None:
-        transaction.description = transaction_update.description
-    if transaction_update.amount is not None:
-        transaction.amount = transaction_update.amount
-
-    db.commit()
-    db.refresh(transaction)
     return transaction
 
 @app.delete("/api/transactions/{transaction_id}")
-async def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
-    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
-    if not transaction:
+async def delete_transaction(transaction_id: int):
+    if not store.delete_transaction(transaction_id):
         raise HTTPException(status_code=404, detail="Transaction not found")
-
-    # Возвращаем сумму на счёт
-    account = db.query(Account).filter(Account.id == transaction.account_id).first()
-    if account:
-        if transaction.type == "expense":
-            account.balance = float(account.balance) + float(transaction.amount)
-        else:
-            account.balance = float(account.balance) - float(transaction.amount)
-
-    db.delete(transaction)
-    db.commit()
     return {"message": "Transaction deleted"}
 
 @app.get("/api/transactions/{user_id}", response_model=List[TransactionResponse])
-async def get_transactions(user_id: int, db: Session = Depends(get_db)):
-    return db.query(Transaction).filter(
-        Transaction.user_id == user_id
-    ).order_by(Transaction.created_at.desc()).all()
+async def get_transactions(user_id: int):
+    return store.list_transactions(user_id)
 
 @app.post("/api/categories", response_model=CategoryResponse)
-async def create_category(category: CategoryCreate, db: Session = Depends(get_db)):
-    db_category = Category(
+async def create_category(category: CategoryCreate):
+    return store.create_category(
         user_id=category.user_id,
         name=category.name,
         icon=category.icon,
-        type=TransactionType(category.type)
+        category_type=category.type,
     )
-    db.add(db_category)
-    db.commit()
-    db.refresh(db_category)
-    return db_category
 
 @app.get("/api/categories/{user_id}", response_model=List[CategoryResponse])
-async def get_categories(user_id: int, db: Session = Depends(get_db)):
-    return db.query(Category).filter(Category.user_id == user_id).all()
+async def get_categories(user_id: int):
+    return store.list_categories(user_id)
 
 @app.delete("/api/categories/{category_id}")
-async def delete_category(category_id: int, db: Session = Depends(get_db)):
-    category = db.query(Category).filter(Category.id == category_id).first()
-    if not category:
+async def delete_category(category_id: int):
+    if not store.delete_category(category_id):
         raise HTTPException(status_code=404, detail="Category not found")
-
-    db.delete(category)
-    db.commit()
     return {"message": "Category deleted"}
 
 @app.get("/api/stats/{user_id}")
-async def get_stats(user_id: int, db: Session = Depends(get_db)):
-    accounts = db.query(Account).filter(Account.user_id == user_id).all()
-    transactions = db.query(Transaction).filter(Transaction.user_id == user_id).all()
-
-    total_balance = sum(acc.balance for acc in accounts)
-    total_income = sum(t.amount for t in transactions if t.type == TransactionType.INCOME)
-    total_expense = sum(t.amount for t in transactions if t.type == TransactionType.EXPENSE)
-
-    return {
-        "total_balance": total_balance,
-        "total_income": total_income,
-        "total_expense": total_expense,
-        "accounts_count": len(accounts),
-        "transactions_count": len(transactions)
-    }
+async def get_stats(user_id: int):
+    return store.get_stats(user_id)
 
 if __name__ == "__main__":
     import os

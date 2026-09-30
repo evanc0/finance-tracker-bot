@@ -9,7 +9,7 @@ finance-tracker-bot/
 ├── backend/
 │   ├── bot.py          # Telegram бот
 │   ├── api.py          # FastAPI сервер
-│   ├── database.py     # Модель данных SQLAlchemy
+│   ├── database.py     # Слой доступа к Google Sheets (gspread)
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/
@@ -65,54 +65,77 @@ npm run build
 
 ## Публикация на GitHub Pages и Render
 
-### Часть 1: Размещение API на Render (бесплатно)
+> **База данных — Google Таблица.** Проект хранит данные в Google Sheets через сервисный
+> аккаунт (модуль `backend/database.py`, библиотека `gspread`). PostgreSQL и SQLite больше
+> не используются. При первом запуске API обязательно задай `SPREADSHEET_ID` и
+> `GOOGLE_CREDENTIALS` (см. ниже), иначе сервер не стартует.
+
+### Часть 1: Google Таблица и API на Render (бесплатно)
+
+#### 1.1. Подготовь Google Таблицу
+
+1. Создай пустую таблицу на https://sheets.google.com (например, `finance-tracker`).
+   Листы создавать вручную не нужно: при первом запуске API сам добавит листы
+   `users`, `accounts`, `categories`, `transactions` с заголовками.
+2. Скопируй **ID таблицы** из адресной строки:
+   `https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit`
+
+#### 1.2. Создай сервисный аккаунт Google
+
+1. Открой https://console.cloud.google.com/ и создай проект.
+2. **APIs & Services → Library** → найди и включи **Google Sheets API**
+   (на всякий случай включи и **Google Drive API**).
+3. **APIs & Services → Credentials → Create Credentials → Service account** →
+   задай имя → **Create and continue** → **Done**.
+4. Открой созданный аккаунт → вкладка **Keys** → **Add key → Create new key → JSON**.
+   Скачается файл с ключом — никому его не передавай.
+5. В файле ключа найди поле `client_email`
+   (например, `finance-bot@project.iam.gserviceaccount.com`) и добавь этот email
+   в Google Таблице через **Поделиться** с правами **Редактор**.
+   Без этого шага API получит ошибку доступа.
+
+#### 1.3. Задеплой API на Render
 
 1. **Зарегистрируйся на Render**
    - Перейди на https://render.com
    - Нажми "Sign up with GitHub"
    - Авторизуйся через GitHub
 
-2. **Создай PostgreSQL базу данных**
-   - Нажми "New +" → "PostgreSQL"
-   - **Name**: `finance-tracker-db`
-   - **Region**: Frankfurt (должен совпадать с регионом сервиса)
-   - **Database**: `render` (или любое имя)
-   - **Plan**: **Free** (1 ГБ данных)
-   - Нажми "Create database"
-   - После создания скопируй **Internal Database URL** (начинается с `postgres://`)
-
-3. **Создай новый Web Service**
+2. **Создай новый Web Service**
    - Нажми "New +" → "Web Service"
    - Выбери "Connect a repository"
    - Найди свой репозиторий `finance-tracker-bot`
 
-4. **Настрой сервис**
+3. **Настрой сервис**
    - **Name**: `finance-tracker-api` (или любое имя)
-   - **Region**: Frankfurt (должен совпадать с PostgreSQL)
+   - **Region**: Frankfurt
    - **Branch**: `main`
    - **Root Directory**: `backend`
    - **Runtime**: `Python 3`
    - **Build Command**: `pip install -r requirements.txt`
    - **Start Command**: `uvicorn api:app --host 0.0.0.0 --port $PORT`
 
-5. **Добавь переменные окружения**
-   - Нажми "Add Environment Variable"
-   - **Key**: `DATABASE_URL`
-   - **Value**: вставь Internal Database URL из PostgreSQL
+4. **Добавь переменные окружения**
+   - `SPREADSHEET_ID` — ID таблицы из шага 1.1
+   - `GOOGLE_CREDENTIALS` — всё содержимое JSON-ключа одной строкой
+     (либо в base64: `base64 -w0 service_account.json`)
+   - `TELEGRAM_BOT_TOKEN` и `WEB_APP_URL` — если этот же сервис запускает бота
    - Нажми "Save"
 
-6. **Выбери тариф**
+5. **Выбери тариф**
    - Выбери **Free** тариф
 
-7. **Нажми "Create Web Service"**
+6. **Нажми "Create Web Service"**
    - Дождись завершения деплоя (2-5 минут)
    - Скопируй URL сервиса (например: `https://finance-tracker-api.onrender.com`)
 
-8. **Проверь API**
+7. **Проверь API**
    - Открой в браузере: `https://your-api.onrender.com/api/user/123456`
    - Должен вернуться JSON с данными
 
-> **Важно:** Данные теперь сохраняются в PostgreSQL и не теряются при перезапуске!
+> **Важно:** данные лежат в твоей Google Таблице и не теряются при перезапуске Render.
+> Бот (`bot.py`) использует ту же таблицу — запускай его отдельным сервисом/процессом
+> с теми же переменными окружения.
 
 ### Часть 2: Обновление frontend
 
@@ -179,8 +202,8 @@ npm run build
 **Backend:**
 - Python + python-telegram-bot
 - FastAPI (REST API)
-- SQLAlchemy (ORM)
-- SQLite (база данных)
+- gspread + google-auth (доступ к Google Таблице)
+- Google Sheets (база данных)
 
 **Frontend:**
 - React 18

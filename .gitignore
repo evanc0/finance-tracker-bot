@@ -2,6 +2,10 @@
 .env
 backend/.env
 
+# Ключ сервисного аккаунта Google
+service_account.json
+*service_account*.json
+
 # Python
 __pycache__/
 *.py[cod]
