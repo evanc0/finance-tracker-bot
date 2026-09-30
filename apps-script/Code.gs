@@ -13,9 +13,9 @@
  *   ответ: {"ok": true, "data": {...}} либо {"ok": false, "error": "..."}
  *
  * Настройки в «Свойствах скрипта» (Project Settings → Script properties):
- *   BOT_TOKEN      — токен бота из BotFather. Если задан, запросы с непустым
- *                    initData проверяются по подписи Telegram, а telegram_id
- *                    берётся из подписанных данных, а не из запроса.
+ *   BOT_TOKEN      — токен бота из BotFather. Если задан, принимаются только
+ *                    запросы с подписью Telegram (initData), а telegram_id
+ *                    берётся из подписанных данных, а не из тела запроса.
  *   API_TOKEN      — общий секрет. Если задан, запросы без initData должны
  *                    прислать совпадающий token.
  *   SPREADSHEET_ID — нужен только если скрипт НЕ привязан к таблице.
@@ -164,7 +164,13 @@ function authorize(request) {
   var apiToken = properties.getProperty('API_TOKEN');
   var userId = toInt(request.payload.user_id, null);
 
-  if (request.initData && botToken) {
+  // Если задан токен бота — принимаем только подписанные данные Telegram.
+  // Иначе любой, кто узнал URL веб-приложения (а он виден в публичной сборке
+  // фронтенда), смог бы читать и менять чужие операции.
+  if (botToken) {
+    if (!request.initData) {
+      throw new Error('Запрос должен прийти из Telegram (нет initData)');
+    }
     var telegramUser = verifyInitData(request.initData, botToken);
     if (!telegramUser) {
       throw new Error('Подпись Telegram не прошла проверку');
@@ -198,19 +204,35 @@ function verifyInitData(initData, botToken) {
   }
 
   var providedHash = params.hash;
+  var signatureField = params.signature || '';
   delete params.hash;
-
-  var dataCheckString = Object.keys(params)
-    .sort()
-    .map(function (key) {
-      return key + '=' + params[key];
-    })
-    .join('\n');
+  delete params.signature;
 
   var secretKey = Utilities.computeHmacSha256Signature(botToken, 'WebAppData');
-  var signature = Utilities.computeHmacSha256Signature(dataCheckString, secretKey);
 
-  if (toHex(signature) !== providedHash) {
+  // Разные версии Telegram считают подпись либо без поля signature, либо с ним.
+  // Проверяем оба варианта, чтобы проверка не зависела от версии клиента.
+  var candidates = [params];
+  if (signatureField) {
+    var withSignature = {};
+    Object.keys(params).forEach(function (key) {
+      withSignature[key] = params[key];
+    });
+    withSignature.signature = signatureField;
+    candidates.push(withSignature);
+  }
+
+  var isValid = candidates.some(function (candidate) {
+    var dataCheckString = Object.keys(candidate)
+      .sort()
+      .map(function (key) {
+        return key + '=' + candidate[key];
+      })
+      .join('\n');
+    return toHex(Utilities.computeHmacSha256Signature(dataCheckString, secretKey)) === providedHash;
+  });
+
+  if (!isValid) {
     return null;
   }
 
