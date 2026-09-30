@@ -208,7 +208,7 @@ function verifyInitData(initData, botToken) {
   delete params.hash;
   delete params.signature;
 
-  var secretKey = Utilities.computeHmacSha256Signature(botToken, 'WebAppData');
+  var secretKey = hmacSha256(botToken, 'WebAppData');
 
   // Разные версии Telegram считают подпись либо без поля signature, либо с ним.
   // Проверяем оба варианта, чтобы проверка не зависела от версии клиента.
@@ -229,7 +229,7 @@ function verifyInitData(initData, botToken) {
         return key + '=' + candidate[key];
       })
       .join('\n');
-    return toHex(Utilities.computeHmacSha256Signature(dataCheckString, secretKey)) === providedHash;
+    return toHex(hmacSha256(dataCheckString, secretKey)) === providedHash;
   });
 
   if (!isValid) {
@@ -259,6 +259,22 @@ function toHex(bytes) {
     hex += part.length < 2 ? '0' + part : part;
   }
   return hex;
+}
+
+function bytesOf(value) {
+  return typeof value === 'string' ? Utilities.newBlob(value).getBytes() : value;
+}
+
+/**
+ * HMAC-SHA256.
+ *
+ * Apps Script принимает только (String, String) либо (Byte[], Byte[]) —
+ * смешивать типы нельзя, иначе вызывается ошибка
+ * "Параметры (String,number[]) не соответствуют сигнатуре метода".
+ * Ключом служат сырые байты, поэтому оба аргумента приводим к Byte[].
+ */
+function hmacSha256(value, key) {
+  return Utilities.computeHmacSha256Signature(bytesOf(value), bytesOf(key));
 }
 
 // ---------------------------------------------------------------------------
