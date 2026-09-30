@@ -177,9 +177,32 @@ def _to_int(value: Any, default: Optional[int] = None) -> Optional[int]:
 def _to_decimal(value: Any, default: Decimal = Decimal("0")) -> Decimal:
     if value is None:
         return default
-    text = str(value).strip().replace(",", ".").replace(" ", "")
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, (int, float)):
+        return Decimal(str(value))
+
+    text = str(value).strip().replace("\xa0", "").replace(" ", "")
     if text == "":
         return default
+
+    # Google Таблица может отдать число в локали таблицы: "1 234,56" или "1,234.56".
+    # Определяем десятичный разделитель по последнему из встреченных знаков.
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        if text.count(",") == 1 and len(text.split(",")[-1]) <= 2:
+            text = text.replace(",", ".")
+        else:
+            text = text.replace(",", "")
+
+    if text.count(".") > 1:
+        head, _, tail = text.rpartition(".")
+        text = head.replace(".", "") + "." + tail
+
     try:
         return Decimal(text)
     except (InvalidOperation, ValueError):
@@ -194,11 +217,20 @@ def _to_datetime(value: Any) -> datetime:
         try:
             return datetime.fromisoformat(text)
         except ValueError:
-            for fmt in ("%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M:%S"):
-                try:
-                    return datetime.strptime(text, fmt)
-                except ValueError:
-                    continue
+            pass
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S",
+            "%d.%m.%Y %H:%M:%S",
+            "%d/%m/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M:%S",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+        ):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
     return datetime.utcnow()
 
 
