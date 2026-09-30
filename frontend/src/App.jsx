@@ -9,7 +9,7 @@ const tg = window.Telegram.WebApp
 tg.ready()
 tg.expand()
 
-import { API_URL } from './config'
+import { callApi } from './api'
 
 const DEFAULT_CATEGORIES = {
   income: [
@@ -73,20 +73,10 @@ function App() {
 
   const fetchUserData = async (telegramId) => {
     try {
-      const response = await fetch(`${API_URL}/api/user/${telegramId}`)
-      if (response.ok) {
-        const data = await response.json()
-        setUserData(data)
-        if (data.accounts.length > 0) {
-          setFormData(prev => ({ ...prev, account_id: data.accounts[0].id.toString() }))
-        }
-      } else {
-        setUserData({
-          user: { telegram_id: telegramId, currency: 'RUB' },
-          accounts: [],
-          transactions: [],
-          categories: []
-        })
+      const data = await callApi('get_user', { user_id: telegramId })
+      setUserData(data)
+      if (data.accounts.length > 0) {
+        setFormData(prev => ({ ...prev, account_id: data.accounts[0].id.toString() }))
       }
     } catch (error) {
       console.error('Ошибка загрузки данных:', error)
@@ -123,15 +113,9 @@ function App() {
 
   const addCustomCategory = async (userId, type, name, icon) => {
     try {
-      const response = await fetch(`${API_URL}/api/categories`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, name, icon, type })
-      })
-      if (response.ok) {
-        showSnackbar('Категория добавлена!')
-        await fetchUserData(userId)
-      }
+      await callApi('create_category', { user_id: userId, name, icon, type })
+      showSnackbar('Категория добавлена!')
+      await fetchUserData(userId)
     } catch (error) {
       console.error('Ошибка добавления категории:', error)
       showSnackbar('Не удалось добавить категорию', 'error')
@@ -140,11 +124,9 @@ function App() {
 
   const deleteCustomCategory = async (userId, categoryId) => {
     try {
-      const response = await fetch(`${API_URL}/api/categories/${categoryId}`, { method: 'DELETE' })
-      if (response.ok) {
-        showSnackbar('Категория удалена!')
-        fetchUserData(userId)
-      }
+      await callApi('delete_category', { category_id: categoryId })
+      showSnackbar('Категория удалена!')
+      fetchUserData(userId)
     } catch (error) {
       console.error('Ошибка удаления категории:', error)
       showSnackbar('Не удалось удалить категорию', 'error')
@@ -154,11 +136,9 @@ function App() {
   const deleteAccount = async (accountId, accountName) => {
     const userId = tg.initDataUnsafe?.user?.id || 123456789
     try {
-      const response = await fetch(`${API_URL}/api/accounts/${accountId}`, { method: 'DELETE' })
-      if (response.ok) {
-        showSnackbar(`Счёт "${accountName}" удалён!`)
-        fetchUserData(userId)
-      }
+      await callApi('delete_account', { account_id: accountId })
+      showSnackbar(`Счёт "${accountName}" удалён!`)
+      fetchUserData(userId)
     } catch (error) {
       console.error('Ошибка удаления счёта:', error)
       showSnackbar('Не удалось удалить счёт', 'error')
@@ -169,11 +149,9 @@ function App() {
   const deleteTransaction = async (transactionId) => {
     const userId = tg.initDataUnsafe?.user?.id || 123456789
     try {
-      const response = await fetch(`${API_URL}/api/transactions/${transactionId}`, { method: 'DELETE' })
-      if (response.ok) {
-        showSnackbar('Операция удалена!')
-        fetchUserData(userId)
-      }
+      await callApi('delete_transaction', { transaction_id: transactionId })
+      showSnackbar('Операция удалена!')
+      fetchUserData(userId)
     } catch (error) {
       console.error('Ошибка удаления операции:', error)
       showSnackbar('Не удалось удалить операцию', 'error')
@@ -192,17 +170,11 @@ function App() {
     if (activeModal === 'create_account') {
       if (!formData.name || !formData.balance) return
       try {
-        const response = await fetch(`${API_URL}/api/accounts`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId, name: formData.name, balance: parseFloat(formData.balance) })
-        })
-        if (response.ok) {
-          tg.sendData(JSON.stringify({ type: 'create_account', name: formData.name, balance: parseFloat(formData.balance) }))
-          closeModal()
-          showSnackbar('Счёт успешно создан!')
-          fetchUserData(userId)
-        }
+        await callApi('create_account', { user_id: userId, name: formData.name, balance: parseFloat(formData.balance) })
+        tg.sendData(JSON.stringify({ type: 'create_account', name: formData.name, balance: parseFloat(formData.balance) }))
+        closeModal()
+        showSnackbar('Счёт успешно создан!')
+        fetchUserData(userId)
       } catch (error) {
         console.error('Ошибка создания счёта:', error)
         showSnackbar('Не удалось создать счёт', 'error')
@@ -210,32 +182,26 @@ function App() {
     } else if (activeModal === 'expense' || activeModal === 'income') {
       if (!formData.amount || !formData.account_id || !formData.category) return
       try {
-        const response = await fetch(`${API_URL}/api/transactions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: userId,
-            account_id: parseInt(formData.account_id),
-            type: activeModal,
-            amount: parseFloat(formData.amount),
-            category: formData.category,
-            description: formData.description
-          })
+        await callApi('create_transaction', {
+          user_id: userId,
+          account_id: parseInt(formData.account_id),
+          type: activeModal,
+          amount: parseFloat(formData.amount),
+          category: formData.category,
+          description: formData.description
         })
-        if (response.ok) {
-          const account = userData.accounts.find(a => a.id === parseInt(formData.account_id))
-          tg.sendData(JSON.stringify({
-            type: activeModal,
-            amount: parseFloat(formData.amount),
-            account_id: parseInt(formData.account_id),
-            account: account?.name,
-            category: formData.category,
-            description: formData.description
-          }))
-          closeModal()
-          showSnackbar(`Операция успешно ${activeModal === 'expense' ? 'создана' : 'создана'}!`)
-          fetchUserData(userId)
-        }
+        const account = userData.accounts.find(a => a.id === parseInt(formData.account_id))
+        tg.sendData(JSON.stringify({
+          type: activeModal,
+          amount: parseFloat(formData.amount),
+          account_id: parseInt(formData.account_id),
+          account: account?.name,
+          category: formData.category,
+          description: formData.description
+        }))
+        closeModal()
+        showSnackbar(`Операция успешно ${activeModal === 'expense' ? 'создана' : 'создана'}!`)
+        fetchUserData(userId)
       } catch (error) {
         console.error('Ошибка создания транзакции:', error)
         showSnackbar('Не удалось создать операцию', 'error')
@@ -247,21 +213,16 @@ function App() {
     } else if (activeModal === 'edit_transaction' && editTransaction) {
       if (!formData.amount || !formData.category) return
       try {
-        const response = await fetch(`${API_URL}/api/transactions/${editTransaction.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            amount: parseFloat(formData.amount),
-            category: formData.category,
-            description: formData.description,
-            account_id: parseInt(formData.account_id)
-          })
+        await callApi('update_transaction', {
+          transaction_id: editTransaction.id,
+          amount: parseFloat(formData.amount),
+          category: formData.category,
+          description: formData.description,
+          account_id: parseInt(formData.account_id)
         })
-        if (response.ok) {
-          showSnackbar('Операция обновлена!')
-          fetchUserData(userId)
-          closeModal()
-        }
+        showSnackbar('Операция обновлена!')
+        fetchUserData(userId)
+        closeModal()
       } catch (error) {
         console.error('Ошибка обновления операции:', error)
         showSnackbar('Не удалось обновить операцию', 'error')

@@ -1,12 +1,15 @@
 // Конфигурация API
-// 
+//
 // ИНСТРУКЦИЯ:
-// 1. Задеплой API на Render (см. README.md)
-// 2. Скопируй полученный URL (например: https://finance-tracker-api.onrender.com)
-// 3. Вставь URL ниже вместо localhost:8000
-// 4. Пересобери frontend: npm run build && npm run deploy
+// 1. Открой Google Таблицу → Расширения → Apps Script.
+// 2. Вставь туда код из apps-script/Code.gs.
+// 3. Разверни как веб-приложение (см. README, раздел «Только Google»).
+// 4. Скопируй URL развёртывания (заканчивается на /exec) и вставь ниже.
+// 5. Пересобери frontend: npm run build && npm run deploy
 
-export const API_URL = 'https://finance-tracker-bot-1.onrender.com'
+export const API_URL = 'https://script.google.com/macros/s/ВСТАВЬ_ID_РАЗВЁРТЫВАНИЯ/exec'
 
-// Пример для Render:
-// export const API_URL = 'https://finance-tracker-api.onrender.com'
+// Необязательно: если в свойствах скрипта задан API_TOKEN, укажи его здесь.
+// Учти, что этот файл попадает в публичную сборку, поэтому как единственная
+// защита он слабый — надёжнее проверять initData по BOT_TOKEN в Apps Script.
+export const API_TOKEN = ''

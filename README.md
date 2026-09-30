@@ -6,7 +6,9 @@
 
 ```
 finance-tracker-bot/
-├── backend/
+├── apps-script/
+│   └── Code.gs         # API для Google Таблицы (вариант без сервера)
+├── backend/            # нужен только для запуска бота / варианта с Render
 │   ├── bot.py          # Telegram бот
 │   ├── api.py          # FastAPI сервер
 │   ├── database.py     # Слой доступа к Google Sheets (gspread)
@@ -15,12 +17,51 @@ finance-tracker-bot/
 └── frontend/
     ├── src/
     │   ├── App.jsx     # Основное React-приложение
+    │   ├── api.js      # Вызовы API (Apps Script)
     │   ├── main.jsx    # Точка входа
     │   └── index.css   # Стили
     ├── index.html
     ├── package.json
     └── vite.config.js
 ```
+
+## Развёртывание API в Apps Script (рекомендуемый вариант)
+
+Здесь не нужны ни Render, ни сервисный аккаунт, ни JSON-ключ: код живёт прямо
+внутри Google Таблицы и работает от твоего имени.
+
+1. Открой свою Google Таблицу → **Расширения → Apps Script**.
+2. Удали содержимое `Code.gs` и вставь код из [`apps-script/Code.gs`](apps-script/Code.gs).
+3. Открой **Свойства скрипта** (⚙️ Project Settings → Script properties) и добавь:
+   - `BOT_TOKEN` — токен бота от BotFather. Если задан, запросы с `initData`
+     проверяются по подписи Telegram, а `telegram_id` берётся из подписанных
+     данных, а не из тела запроса.
+   - `API_TOKEN` — необязательный общий секрет для запросов без `initData`.
+   - `SPREADSHEET_ID` — нужен только если скрипт **не** привязан к таблице.
+4. **Развернуть → Новое развёртывание**:
+   - тип: **Веб-приложение**;
+   - **Запуск от имени**: Я;
+   - **У кого есть доступ**: Все;
+   - нажми **Развернуть**.
+5. Скопируй URL развёртывания (заканчивается на `/exec`) и вставь его
+   в `frontend/src/config.js` → `API_URL`.
+6. Пересобери и опубликуй фронтенд:
+
+   ```bash
+   cd frontend
+   npm run build
+   npm run deploy
+   ```
+
+Проверка: открой URL в браузере — должно вернуться `{"ok":true,...}`.
+
+> **Важно:** после правки кода нужно сделать
+> **Развернуть → Управление развёртываниями → ✏️ → Версия: Новая версия → Развернуть**.
+> Без этого тот же URL продолжит отдавать старый код.
+
+Ограничения Apps Script: ~6 минут на один запуск и ~90 минут суммарного времени
+в сутки для обычного Google-аккаунта, поэтому ссылку на веб-приложение лучше
+никому не показывать и включить проверку по `BOT_TOKEN`.
 
 ## Установка и запуск
 
@@ -63,7 +104,13 @@ npm run dev
 npm run build
 ```
 
-## Публикация на GitHub Pages и Render
+## Публикация на GitHub Pages и Render (альтернатива)
+
+> **Это запасной вариант.** Основной путь — Apps Script (см. выше): там не нужны
+> ни Render, ни сервисный аккаунт. Раздел ниже актуален, если ты сознательно
+> хочешь держать отдельный сервер (например, чтобы запускать на нём бота).
+> В этом случае в `frontend/src/config.js` укажи адрес Render вместо адреса
+> Apps Script.
 
 > **База данных — Google Таблица.** Проект хранит данные в Google Sheets через сервисный
 > аккаунт (модуль `backend/database.py`, библиотека `gspread`). PostgreSQL и SQLite больше
@@ -199,17 +246,22 @@ npm run build
 
 ## Технологии
 
-**Backend:**
-- Python + python-telegram-bot
-- FastAPI (REST API)
-- gspread + google-auth (доступ к Google Таблице)
-- Google Sheets (база данных)
-
 **Frontend:**
 - React 18
 - Vite
 - Chart.js (диаграммы)
 - Telegram Web Apps API
+
+**API (вариант Apps Script):**
+- Google Apps Script Web App (`apps-script/Code.gs`)
+- Google Sheets как хранилище
+- Проверка `initData` по HMAC-SHA256
+
+**Backend (вариант с сервером / для бота):**
+- Python + python-telegram-bot
+- FastAPI (REST API)
+- gspread + google-auth (доступ к Google Таблице)
+- Google Sheets (база данных)
 
 ## Локальный запуск с ngrok
 
